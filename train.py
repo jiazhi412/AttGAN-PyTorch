@@ -31,9 +31,9 @@ def parse(args=None):
     
     parser.add_argument('--attrs', dest='attrs', default=attrs_default, nargs='+', help='attributes to learn')
     parser.add_argument('--data', dest='data', type=str, choices=['CelebA', 'CelebA-HQ'], default='CelebA')
-    parser.add_argument('--data_path', dest='data_path', type=str, default='data/img_align_celeba')
-    parser.add_argument('--attr_path', dest='attr_path', type=str, default='data/list_attr_celeba.txt')
-    parser.add_argument('--image_list_path', dest='image_list_path', type=str, default='data/image_list.txt')
+    parser.add_argument('--data_path', dest='data_path', type=str, default='../../datasets/CelebA/raw_data/img_align_celeba')
+    parser.add_argument('--attr_path', dest='attr_path', type=str, default='../../datasets/CelebA/raw_data/list_attr_celeba.txt')
+    parser.add_argument('--image_list_path', dest='image_list_path', type=str, default='../../datasets/CelebA/raw_image_list.txt')
     
     parser.add_argument('--img_size', dest='img_size', type=int, default=128)
     parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=1)
@@ -116,6 +116,9 @@ progressbar = Progressbar()
 writer = SummaryWriter(join('output', args.experiment_name, 'summary'))
 
 fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
+fixed_att_a = torch.unsqueeze(fixed_att_a,1) if len(list(fixed_att_a.size())) == 1 else fixed_att_a
+# print(fixed_att_a.size())
+# print(fixed_att_a)
 fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
 fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
 fixed_att_a = fixed_att_a.type(torch.float)
@@ -137,6 +140,7 @@ for epoch in range(args.epochs):
     for img_a, att_a in progressbar(train_dataloader):
         attgan.train()
         
+        att_a = torch.unsqueeze(att_a,1) if len(list(att_a.size())) == 1 else att_a
         img_a = img_a.cuda() if args.gpu else img_a
         att_a = att_a.cuda() if args.gpu else att_a
         idx = torch.randperm(len(att_a))
@@ -146,6 +150,8 @@ for epoch in range(args.epochs):
         att_b = att_b.type(torch.float)
         
         att_a_ = (att_a * 2 - 1) * args.thres_int
+        # print(att_a)
+        # print(att_a_)
         if args.b_distribution == 'none':
             att_b_ = (att_b * 2 - 1) * args.thres_int
         if args.b_distribution == 'uniform':

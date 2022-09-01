@@ -43,6 +43,7 @@ class CelebA(data.Dataset):
         atts = [att_list.index(att) + 1 for att in selected_attrs]
         images = np.loadtxt(attr_path, skiprows=2, usecols=[0], dtype=np.str)
         labels = np.loadtxt(attr_path, skiprows=2, usecols=atts, dtype=np.int)
+        # print(labels.shape)
         
         if mode == 'train':
             self.images = images[:182000]
@@ -65,6 +66,8 @@ class CelebA(data.Dataset):
     def __getitem__(self, index):
         img = self.tf(Image.open(os.path.join(self.data_path, self.images[index])))
         att = torch.tensor((self.labels[index] + 1) // 2)
+        # print(att.size())
+        # print(att.size())
         return img, att
     def __len__(self):
         return self.length

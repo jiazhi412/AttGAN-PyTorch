@@ -61,6 +61,10 @@ class Generator(nn.Module):
     
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, 1, self.f_size, self.f_size)
+        print(a)
+        print(a_tile)
+        print(a.size())
+        print(a_tile.size())
         z = torch.cat([zs[-1], a_tile], dim=1)
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
@@ -86,7 +90,7 @@ class Generator(nn.Module):
 class Discriminators(nn.Module):
     # No instancenorm in fcs in source code, which is different from paper.
     def __init__(self, dim=64, norm_fn='instancenorm', acti_fn='lrelu',
-                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128):
+                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128, n_attrs=13):
         super(Discriminators, self).__init__()
         self.f_size = img_size // 2**n_layers
         
@@ -105,7 +109,7 @@ class Discriminators(nn.Module):
         )
         self.fc_cls = nn.Sequential(
             LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-            LinearBlock(fc_dim, 13, 'none', 'none')
+            LinearBlock(fc_dim, n_attrs, 'none', 'none')
         )
     
     def forward(self, x):
@@ -131,6 +135,8 @@ class AttGAN():
         self.lambda_2 = args.lambda_2
         self.lambda_3 = args.lambda_3
         self.lambda_gp = args.lambda_gp
+
+        # print(args.n_attrs)
         
         self.G = Generator(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
@@ -143,7 +149,8 @@ class AttGAN():
         
         self.D = Discriminators(
             args.dis_dim, args.dis_norm, args.dis_acti,
-            args.dis_fc_dim, args.dis_fc_norm, args.dis_fc_acti, args.dis_layers, args.img_size
+            args.dis_fc_dim, args.dis_fc_norm, args.dis_fc_acti, args.dis_layers, args.img_size,
+            args.n_attrs
         )
         self.D.train()
         if self.gpu: self.D.cuda()
@@ -234,6 +241,8 @@ class AttGAN():
             df_loss = F.binary_cross_entropy_with_logits(d_real, torch.ones_like(d_real)) + \
                       F.binary_cross_entropy_with_logits(d_fake, torch.zeros_like(d_fake))
             df_gp = gradient_penalty(self.D, img_a)
+        # print(dc_real.size())
+        # print(att_a.size())
         dc_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
         d_loss = df_loss + self.lambda_gp * df_gp + self.lambda_3 * dc_loss
         
