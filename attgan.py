@@ -61,10 +61,10 @@ class Generator(nn.Module):
     
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, 1, self.f_size, self.f_size)
-        print(a)
-        print(a_tile)
-        print(a.size())
-        print(a_tile.size())
+        # print(a)
+        # print(a_tile)
+        # print(a.size())
+        # print(a_tile.size())
         z = torch.cat([zs[-1], a_tile], dim=1)
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
@@ -174,7 +174,13 @@ class AttGAN():
             p.requires_grad = False
         
         zs_a = self.G(img_a, mode='enc')
-        img_fake = self.G(zs_a, att_b_, mode='dec')
+        # uniform label 0 is between 0.5 and -0.5
+        att_c_ = torch.zeros_like(att_b_)
+        # print(att_a_)
+        # print(att_c_)
+        # print(att_a_.size())
+        # print(att_c_.size())
+        img_fake = self.G(zs_a, att_c_, mode='dec')
         img_recon = self.G(zs_a, att_a_, mode='dec')
         d_fake, dc_fake = self.D(img_fake)
         
@@ -184,7 +190,12 @@ class AttGAN():
             gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b)
+        att_c = torch.ones_like(att_b) / 2
+        # print(att_b)
+        # print(att_c)
+        # print(att_b.size())
+        # print(att_c.size())
+        gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_c)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.lambda_2 * gc_loss + self.lambda_1 * gr_loss
         
@@ -202,7 +213,9 @@ class AttGAN():
         for p in self.D.parameters():
             p.requires_grad = True
         
-        img_fake = self.G(img_a, att_b_).detach()
+        # uniform label 0 is between 0.5 and -0.5
+        att_c_ = torch.zeros_like(att_b_)
+        img_fake = self.G(img_a, att_c_).detach()
         d_real, dc_real = self.D(img_a)
         d_fake, dc_fake = self.D(img_fake)
         
