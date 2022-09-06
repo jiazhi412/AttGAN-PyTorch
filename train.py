@@ -53,9 +53,9 @@ def parse(args=None):
     parser.add_argument('--dec_acti', dest='dec_acti', type=str, default='relu')
     parser.add_argument('--dis_acti', dest='dis_acti', type=str, default='lrelu')
     parser.add_argument('--dis_fc_acti', dest='dis_fc_acti', type=str, default='relu')
-    parser.add_argument('--lambda_1', dest='lambda_1', type=float, default=100.0)
-    parser.add_argument('--lambda_2', dest='lambda_2', type=float, default=10.0)
-    parser.add_argument('--lambda_3', dest='lambda_3', type=float, default=1.0)
+    parser.add_argument('--lambda_1', dest='lambda_1', type=float, default=100.0) # reconstruction loss (generator)
+    parser.add_argument('--lambda_2', dest='lambda_2', type=float, default=10.0) # classifier loss (generator)
+    parser.add_argument('--lambda_3', dest='lambda_3', type=float, default=1.0) # classifier loss (discriminator)
     parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0)
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
@@ -123,11 +123,15 @@ fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
 fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
 fixed_att_a = fixed_att_a.type(torch.float)
 sample_att_b_list = [fixed_att_a]
+# print(sample_att_b_list)
+# sample_att_b_list: 1->fixed_att_a; 2->att_b
 for i in range(args.n_attrs):
     tmp = fixed_att_a.clone()
     tmp[:, i] = 1 - tmp[:, i]
     tmp = check_attribute_conflict(tmp, args.attrs[i], args.attrs)
     sample_att_b_list.append(tmp)
+# print('skip')
+# print(sample_att_b_list)
 
 it = 0
 it_per_epoch = len(train_dataset) // args.batch_size
@@ -170,7 +174,7 @@ for epoch in range(args.epochs):
             errG = attgan.trainG(img_a, att_a, att_a_, att_b, att_b_)
             add_scalar_dict(writer, errG, it+1, 'G')
             progressbar.say(epoch=epoch, iter=it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
-        
+
         if (it+1) % args.save_interval == 0:
             # To save storage space, I only checkpoint the weights of G.
             # If you'd like to keep weights of G, D, optim_G, optim_D,
@@ -181,15 +185,25 @@ for epoch in range(args.epochs):
             # attgan.save(os.path.join(
             #     'output', args.experiment_name, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
+        # samples: 1->input images 2->reconstructed images 3->filtered images
+        # e.g. att_b->0,1 att_b_->0.5,-0.5
         if (it+1) % args.sample_interval == 0:
             attgan.eval()
             with torch.no_grad():
                 samples = [fixed_img_a]
                 for i, att_b in enumerate(sample_att_b_list):
+                    # print(att_b)
                     att_b_ = (att_b * 2 - 1) * args.thres_int
+                    # print('1')
+                    # print(att_b_)
                     if i > 0:
                         att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int
+                        att_b_ = torch.zeros_like(att_b_)
+                    # print('2')
+                    # print(att_b_)
                     samples.append(attgan.G(fixed_img_a, att_b_))
+                #     print('3')
+                # print('end')
                 samples = torch.cat(samples, dim=3)
                 writer.add_image('sample', vutils.make_grid(samples, nrow=1, normalize=True, range=(-1., 1.)), it+1)
                 vutils.save_image(samples, os.path.join(

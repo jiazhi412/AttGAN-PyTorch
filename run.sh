@@ -1,26 +1,11 @@
-python train.py \
---img_size 128 \
---shortcut_layers 1 \
---inject_layers 1 \
---experiment_name male_only \
---gpu \
---attrs Male Blond_Hair
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name male_only --gpu --attrs Male Blond_Hair
 
-python train.py \
---img_size 128 \
---shortcut_layers 1 \
---inject_layers 1 \
---experiment_name male_only \
---gpu \
---attrs Male 
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name male_only --gpu --attrs Male 
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name male_only_test --gpu --attrs Male Blond_Hair --sample_interval 1
 
-python train.py \
---img_size 128 \
---shortcut_layers 1 \
---inject_layers 1 \
---experiment_name blur_sex \
---gpu \
---attrs Male 
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name blur_sex_3 --gpu --attrs Male 
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name blur_sex_4 --gpu --attrs Male --lambda_1 200
+python train.py --img_size 128 --shortcut_layers 1 --inject_layers 1 --experiment_name blur_sex_2 --gpu --attrs Male --lambda_1 300
 
 python test_multi.py \
 --experiment_name 128_shortcut1_inject1_none \

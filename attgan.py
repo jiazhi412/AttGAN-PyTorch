@@ -174,7 +174,7 @@ class AttGAN():
             p.requires_grad = False
         
         zs_a = self.G(img_a, mode='enc')
-        # uniform label 0 is between 0.5 and -0.5
+        # uniform: label 0 is between 0.5 and -0.5
         att_c_ = torch.zeros_like(att_b_)
         # print(att_a_)
         # print(att_c_)
