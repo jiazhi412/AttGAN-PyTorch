@@ -10,7 +10,7 @@ python train.py \
 --img_size 128 \
 --shortcut_layers 1 \
 --inject_layers 1 \
---experiment_name male_only \
+--experiment_name male_only2 \
 --gpu \
 --attrs Male 
 

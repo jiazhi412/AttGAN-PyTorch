@@ -190,6 +190,7 @@ for epoch in range(args.epochs):
                     if i > 0:
                         att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int
                     samples.append(attgan.G(fixed_img_a, att_b_))
+                samples.append((samples[-1] + samples[-2])/2)
                 samples = torch.cat(samples, dim=3)
                 writer.add_image('sample', vutils.make_grid(samples, nrow=1, normalize=True, range=(-1., 1.)), it+1)
                 vutils.save_image(samples, os.path.join(
