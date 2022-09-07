@@ -176,18 +176,22 @@ class AttGAN():
         zs_a = self.G(img_a, mode='enc')
         # uniform: label 0 is between 0.5 and -0.5
         att_c_ = torch.zeros_like(att_b_)
+        att_c = torch.ones_like(att_b) / 2
         # print(att_a_)
         # print(att_c_)
         # print(att_a_.size())
         # print(att_c_.size())
-        img_fake = self.G(zs_a, att_c_, mode='dec')
-        img_recon = self.G(zs_a, att_a_, mode='dec')
+        # print(zs_a)
+        # print(att_c)
+        # print('hahah')
+        img_fake = self.G(zs_a, att_c, mode='dec')
+        img_recon = self.G(zs_a, att_a, mode='dec')
         d_fake, dc_fake = self.D(img_fake)
         
         if self.mode == 'wgan':
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
-            gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
+            gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
         att_c = torch.ones_like(att_b) / 2
@@ -196,6 +200,9 @@ class AttGAN():
         # print(att_b.size())
         # print(att_c.size())
         gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_c)
+        # print(img_recon)
+        # print(img_a)
+        # print('das')
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.lambda_2 * gc_loss + self.lambda_1 * gr_loss
         
@@ -215,7 +222,8 @@ class AttGAN():
         
         # uniform label 0 is between 0.5 and -0.5
         att_c_ = torch.zeros_like(att_b_)
-        img_fake = self.G(img_a, att_c_).detach()
+        att_c = torch.ones_like(att_b) / 2
+        img_fake = self.G(img_a, att_c).detach()
         d_real, dc_real = self.D(img_a)
         d_fake, dc_fake = self.D(img_fake)
         

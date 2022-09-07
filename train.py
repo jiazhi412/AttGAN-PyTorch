@@ -198,7 +198,7 @@ for epoch in range(args.epochs):
                     # print(att_b_)
                     if i > 0:
                         att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int
-                        att_b_ = torch.zeros_like(att_b_)
+                        att_b_ = torch.ones_like(att_b) / 2
                     # print('2')
                     # print(att_b_)
                     samples.append(attgan.G(fixed_img_a, att_b_))
