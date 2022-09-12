@@ -31,8 +31,8 @@ def parse(args=None):
     
     parser.add_argument('--attrs', dest='attrs', default=attrs_default, nargs='+', help='attributes to learn')
     parser.add_argument('--data', dest='data', type=str, choices=['CelebA', 'CelebA-HQ'], default='CelebA')
-    parser.add_argument('--data_path', dest='data_path', type=str, default='../../datasets/CelebA/raw_data/img_align_celeba')
-    parser.add_argument('--attr_path', dest='attr_path', type=str, default='../../datasets/CelebA/raw_data/list_attr_celeba.txt')
+    parser.add_argument('--data_path', dest='data_path', type=str, default='/nas/vista-ssd01/users/jiazli/datasets/CelebA/raw_data/img_align_celeba')
+    parser.add_argument('--attr_path', dest='attr_path', type=str, default='/nas/vista-ssd01/users/jiazli/datasets/CelebA/raw_data/list_attr_celeba.txt')
     parser.add_argument('--image_list_path', dest='image_list_path', type=str, default='../../datasets/CelebA/raw_image_list.txt')
     
     parser.add_argument('--img_size', dest='img_size', type=int, default=128)
