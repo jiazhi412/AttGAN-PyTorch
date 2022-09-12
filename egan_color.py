@@ -180,7 +180,7 @@ class AttGAN():
         self.G = Generator(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
             args.dec_dim, args.dec_layers, args.dec_norm, args.dec_acti,
-            args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size.
+            args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size,
             args.dim_per_attr
         )
         self.G.train()
