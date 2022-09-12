@@ -5,9 +5,11 @@
 
 """AttGAN, generator, and discriminator."""
 
+from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
 from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
+import backbones.basenet as basenet
 from torchsummary import summary
 import wandb
 
@@ -19,12 +21,11 @@ MAX_DIM = 64 * 16  # 1024
 class Generator(nn.Module):
     def __init__(self, enc_dim=64, enc_layers=5, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
                  dec_dim=64, dec_layers=5, dec_norm_fn='batchnorm', dec_acti_fn='relu',
-                 n_attrs=13, shortcut_layers=1, inject_layers=0, img_size=128, dim_per_attr=5):
+                 n_attrs=1, shortcut_layers=1, inject_layers=1, img_size=224):
         super(Generator, self).__init__()
         self.shortcut_layers = min(shortcut_layers, dec_layers - 1)
         self.inject_layers = min(inject_layers, dec_layers - 1)
         self.f_size = img_size // 2**enc_layers  # f_size = 4 for 128x128
-        self.dim_per_attr = dim_per_attr
         
         layers = []
         n_in = 3
@@ -62,19 +63,19 @@ class Generator(nn.Module):
         return zs
     
     def decode(self, zs, a):
-        a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
-        z = torch.cat([zs[-1], a_tile], dim=1)
+        a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, 1, self.f_size, self.f_size)
+        # print(a)
+        # print(a_tile)
         # print(a.size())
         # print(a_tile.size())
-        # print(zs[-1].size())
-        # print(z.size())
+        z = torch.cat([zs[-1], a_tile], dim=1)
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
             if self.shortcut_layers > i:  # Concat 1024 with 512
                 z = torch.cat([z, zs[len(self.dec_layers) - 2 - i]], dim=1)
             if self.inject_layers > i:
                 a_tile = a.view(a.size(0), -1, 1, 1) \
-                          .repeat(1, self.dim_per_attr, self.f_size * 2**(i+1), self.f_size * 2**(i+1))
+                          .repeat(1, 1, self.f_size * 2**(i+1), self.f_size * 2**(i+1))
                 z = torch.cat([z, a_tile], dim=1)
         return z
     
@@ -105,23 +106,50 @@ class Discriminators(nn.Module):
             )]
             n_in = n_out
         self.conv = nn.Sequential(*layers)
-        fc_in_dim = min(dim * 2**(n_layers-1), MAX_DIM)
-        # print(fc_in_dim)
         self.fc_adv = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+            LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
             LinearBlock(fc_dim, 1, 'none', 'none')
         )
-        self.fc_cls = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-            LinearBlock(fc_dim, n_attrs, 'none', 'none')
-        )
+
+
+        # self.fc_cls = nn.Sequential(
+        #     LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+        #     LinearBlock(fc_dim, 2, 'none', 'none')
+        # )
     
     def forward(self, x):
         h = self.conv(x)
         h = h.view(h.size(0), -1)
-        return self.fc_adv(h), self.fc_cls(h)
+        return self.fc_adv(h)
 
 
+class Predictor(nn.Module):
+    
+    def __init__(self):
+        super().__init__()
+        self.hidden_size = 128
+        # ========= create models ===========
+        self.predictor = basenet.ResNet18(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=0.5)
+        # if opt['predictor'] == 'ResNet50':
+        #     self.predictor = basenet.ResNet50(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
+        # elif opt['predictor'] == 'ResNet18':
+        #     self.predictor = basenet.ResNet18(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
+        # elif opt['predictor'] == 'VGG16':
+        #     self.predictor = basenet.Vgg16(n_classes=2, pretrained=True, dropout=opt['dropout']).to(self.device)
+
+    def forward(self, x):
+        out, feature = self.predictor(x)
+        return out
+    
+    def load_weights(self, file_path, optim_pred=None):
+        ckpt = torch.load(file_path)
+        self.predictor.load_state_dict(ckpt["predictor"])
+    
+    def _criterion_pred(self, output, target):
+        self.logsoftmax = torch.nn.LogSoftmax(dim=1)
+        y = self.logsoftmax(output)
+        return torch.mean(torch.sum(-1*torch.mul(target, y), dim=1))
+        
 
 import torch.autograd as autograd
 import torch.nn.functional as F
@@ -129,6 +157,25 @@ import torch.optim as optim
 
 
 # multilabel_soft_margin_loss = sigmoid + binary_cross_entropy
+
+def one_hot_embedding(labels, num_classes):
+    """Embedding labels to one-hot form.
+
+    Args:
+    labels: (LongTensor) class labels, sized [N,].
+    num_classes: (int) number of classes.
+
+    Returns:
+    (tensor) encoded labels, sized [N, #classes].
+    """
+    labels = labels.type(torch.LongTensor)
+    # print(labels.size())
+    y = torch.eye(num_classes) 
+    # print(y.size())
+    res = y[labels].squeeze_()
+    # print(res.size())
+    # return y[labels] 
+    return res
 
 class AttGAN():
     def __init__(self, args):
@@ -145,8 +192,7 @@ class AttGAN():
         self.G = Generator(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
             args.dec_dim, args.dec_layers, args.dec_norm, args.dec_acti,
-            args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size,
-            args.dim_per_attr
+            args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size
         )
         self.G.train()
         if self.gpu: self.G.cuda()
@@ -160,10 +206,16 @@ class AttGAN():
         self.D.train()
         if self.gpu: self.D.cuda()
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
+
+        self.P = Predictor()
+        self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CelebA/onehot.pth')
+        self.P.eval()
+        if self.gpu: self.P.cuda()
         
         if self.multi_gpu:
             self.G = nn.DataParallel(self.G)
             self.D = nn.DataParallel(self.D)
+            self.P = nn.DataParallel(self.P)
         
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
@@ -174,29 +226,35 @@ class AttGAN():
         for g in self.optim_D.param_groups:
             g['lr'] = lr
     
-    def trainG(self, img_a, att_a, att_a_, att_b, att_b_):
+    def trainG(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = False
-        
+
         zs_a = self.G(img_a, mode='enc')
-        img_fake = self.G(zs_a, att_b_, mode='dec')
-        img_recon = self.G(zs_a, att_a_, mode='dec')
-        d_fake, dc_fake = self.D(img_fake)
+
+        att_a__ = one_hot_embedding(labels = att_a, num_classes=2).cuda()
+        att_b__ = one_hot_embedding(labels = att_b, num_classes=2).cuda()
+        att_c__ = torch.ones_like(att_b__) / 2
+        att_c = torch.ones_like(att_b) / 2
+        
+        img_fake = self.G(zs_a, att_c, mode='dec')
+        img_recon = self.G(zs_a, att_a, mode='dec')
+        d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         
         if self.mode == 'wgan':
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
-            gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
+            gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b)
+        gc_loss = self.P._criterion_pred(dc_fake, att_c__)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.gc * gc_loss + self.gr * gr_loss
         
         self.optim_G.zero_grad()
         g_loss.backward()
         self.optim_G.step()
-
+        
         wandb.log({
             'g/total_loss': g_loss.item(),
             'g/fake_loss': gf_loss.item(),
@@ -209,13 +267,21 @@ class AttGAN():
         }
         return errG
     
-    def trainD(self, img_a, att_a, att_a_, att_b, att_b_):
+    def trainD(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = True
         
-        img_fake = self.G(img_a, att_b_).detach()
-        d_real, dc_real = self.D(img_a)
-        d_fake, dc_fake = self.D(img_fake)
+        # uniform label 0 is between 0.5 and -0.5
+        att_a__ = one_hot_embedding(labels = att_a, num_classes=2).cuda()
+        att_b__ = one_hot_embedding(labels = att_b, num_classes=2).cuda()
+        att_c__ = torch.ones_like(att_b__) / 2
+        att_c = torch.ones_like(att_b) / 2
+        # print(att_a)
+        # print(att_a__)
+        
+        img_fake = self.G(img_a, att_c).detach()
+        d_real, dc_real = self.D(img_a), self.P(img_a)
+        d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         
         def gradient_penalty(f, real, fake=None):
             def interpolate(a, b=None):
@@ -254,7 +320,7 @@ class AttGAN():
             df_gp = gradient_penalty(self.D, img_a)
         # print(dc_real.size())
         # print(att_a.size())
-        dc_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
+        dc_loss = self.P._criterion_pred(dc_real, att_a__)
         d_loss = df_loss + self.lambda_gp * df_gp + self.dc * dc_loss
         
         self.optim_D.zero_grad()

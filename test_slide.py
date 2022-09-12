@@ -15,7 +15,7 @@ import torch.utils.data as data
 import torchvision.utils as vutils
 
 from attgan import AttGAN
-from data import check_attribute_conflict
+from dataloader.CelebA_origin import check_attribute_conflict
 from helpers import Progressbar
 from utils import find_model
 
@@ -60,15 +60,15 @@ assert args.test_att is not None, 'test_att should be chosen in %s' % (str(args.
 
 if args.custom_img:
     output_path = join('output', args.experiment_name, 'custom_testing_slide_' + args.test_att)
-    from data import Custom
+    from dataloader.CelebA_origin import Custom
     test_dataset = Custom(args.custom_data, args.custom_attr, args.img_size, args.attrs)
 else:
     output_path = join('output', args.experiment_name, 'sample_testing_slide_' + args.test_att)
     if args.data == 'CelebA':
-        from data import CelebA
+        from dataloader.CelebA_origin import CelebA
         test_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'test', args.attrs)
     if args.data == 'CelebA-HQ':
-        from data import CelebA_HQ
+        from dataloader.CelebA_origin import CelebA_HQ
         test_dataset = CelebA_HQ(args.data_path, args.attr_path, args.image_list_path, args.img_size, 'test', args.attrs)
 os.makedirs(output_path, exist_ok=True)
 test_dataloader = data.DataLoader(

@@ -15,7 +15,7 @@ import torch.utils.data as data
 import torchvision.utils as vutils
 
 from attgan import AttGAN
-from data import check_attribute_conflict
+from dataloader.CelebA_origin import check_attribute_conflict
 from helpers import Progressbar
 from utils import find_model
 
@@ -60,19 +60,24 @@ assert len(args.test_ints) == len(args.test_atts), 'the lengths of test_ints and
 
 if args.custom_img:
     output_path = join('output', args.experiment_name, 'custom_testing_multi_' + str(args.test_atts))
-    from data import Custom
+    from dataloader.CelebA_origin import Custom
     test_dataset = Custom(args.custom_data, args.custom_attr, args.img_size, args.attrs)
 else:
     output_path = join('output', args.experiment_name, 'sample_testing_multi_' + str(args.test_atts))
     if args.data == 'CelebA':
-        from data import CelebA
+        from dataloader.CelebA_origin import CelebA
+        train_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'train', args.attrs)
         test_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'test', args.attrs)
     if args.data == 'CelebA-HQ':
-        from data import CelebA_HQ
+        from dataloader.CelebA_origin import CelebA_HQ
         test_dataset = CelebA_HQ(args.data_path, args.attr_path, args.image_list_path, args.img_size, 'test', args.attrs)
 os.makedirs(output_path, exist_ok=True)
+# test_dataloader = data.DataLoader(
+#     test_dataset, batch_size=1, num_workers=args.num_workers,
+#     shuffle=False, drop_last=False
+# )
 test_dataloader = data.DataLoader(
-    test_dataset, batch_size=1, num_workers=args.num_workers,
+    train_dataset, batch_size=1, num_workers=args.num_workers,
     shuffle=False, drop_last=False
 )
 if args.num_test is None:
@@ -94,6 +99,8 @@ for idx, (img_a, att_a) in enumerate(test_dataloader):
     att_a = att_a.cuda() if args.gpu else att_a
     att_a = att_a.type(torch.float)
     att_b = att_a.clone()
+
+    print(att_a)
     
     for a in args.test_atts:
         i = args.attrs.index(a)
@@ -106,6 +113,7 @@ for idx, (img_a, att_a) in enumerate(test_dataloader):
         for a, i in zip(args.test_atts, args.test_ints):
             att_b_[..., args.attrs.index(a)] = att_b_[..., args.attrs.index(a)] * i / args.thres_int
         samples.append(attgan.G(img_a, att_b_))
+        samples.append((samples[0] + samples[1]) / 2)
         samples = torch.cat(samples, dim=3)
         if args.custom_img:
             out_file = test_dataset.images[idx]

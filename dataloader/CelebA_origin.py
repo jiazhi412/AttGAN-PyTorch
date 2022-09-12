@@ -54,7 +54,7 @@ class CelebA(data.Dataset):
         if mode == 'test':
             self.images = images[182637:]
             self.labels = labels[182637:]
-        
+
         self.tf = transforms.Compose([
             transforms.CenterCrop(170),
             transforms.Resize(image_size),

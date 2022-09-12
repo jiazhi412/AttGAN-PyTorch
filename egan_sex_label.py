@@ -5,9 +5,11 @@
 
 """AttGAN, generator, and discriminator."""
 
+from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
 from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
+import backbones.basenet as basenet
 from torchsummary import summary
 import wandb
 
@@ -19,7 +21,7 @@ MAX_DIM = 64 * 16  # 1024
 class Generator(nn.Module):
     def __init__(self, enc_dim=64, enc_layers=5, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
                  dec_dim=64, dec_layers=5, dec_norm_fn='batchnorm', dec_acti_fn='relu',
-                 n_attrs=13, shortcut_layers=1, inject_layers=0, img_size=128, dim_per_attr=5):
+                 n_attrs=1, shortcut_layers=1, inject_layers=1, img_size=224, dim_per_attr = 5):
         super(Generator, self).__init__()
         self.shortcut_layers = min(shortcut_layers, dec_layers - 1)
         self.inject_layers = min(inject_layers, dec_layers - 1)
@@ -37,7 +39,8 @@ class Generator(nn.Module):
         self.enc_layers = nn.ModuleList(layers)
         
         layers = []
-        n_in = n_in + n_attrs  # 1024 + 13
+        dim_attrs = n_attrs * dim_per_attr  
+        n_in = n_in + dim_attrs
         for i in range(dec_layers):
             if i < dec_layers - 1:
                 n_out = min(dec_dim * 2**(dec_layers-i-1), MAX_DIM)
@@ -46,10 +49,10 @@ class Generator(nn.Module):
                 )]
                 n_in = n_out
                 n_in = n_in + n_in//2 if self.shortcut_layers > i else n_in
-                n_in = n_in + n_attrs if self.inject_layers > i else n_in
-            else:
+                n_in = n_in + dim_attrs if self.inject_layers > i else n_in # inject attr
+            else: # last layer
                 layers += [ConvTranspose2dBlock(
-                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='tanh'
+                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='sigmoid'
                 )]
         self.dec_layers = nn.ModuleList(layers)
     
@@ -63,11 +66,11 @@ class Generator(nn.Module):
     
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
-        z = torch.cat([zs[-1], a_tile], dim=1)
+        # print(a)
+        # print(a_tile)
         # print(a.size())
         # print(a_tile.size())
-        # print(zs[-1].size())
-        # print(z.size())
+        z = torch.cat([zs[-1], a_tile], dim=1)
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
             if self.shortcut_layers > i:  # Concat 1024 with 512
@@ -92,7 +95,7 @@ class Generator(nn.Module):
 class Discriminators(nn.Module):
     # No instancenorm in fcs in source code, which is different from paper.
     def __init__(self, dim=64, norm_fn='instancenorm', acti_fn='lrelu',
-                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128, n_attrs=13):
+                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128, n_attrs=1):
         super(Discriminators, self).__init__()
         self.f_size = img_size // 2**n_layers
         
@@ -105,23 +108,49 @@ class Discriminators(nn.Module):
             )]
             n_in = n_out
         self.conv = nn.Sequential(*layers)
-        fc_in_dim = min(dim * 2**(n_layers-1), MAX_DIM)
-        # print(fc_in_dim)
         self.fc_adv = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+            LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
             LinearBlock(fc_dim, 1, 'none', 'none')
         )
-        self.fc_cls = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-            LinearBlock(fc_dim, n_attrs, 'none', 'none')
-        )
+
+
+        # self.fc_cls = nn.Sequential(
+        #     LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+        #     LinearBlock(fc_dim, 2, 'none', 'none')
+        # )
     
     def forward(self, x):
         h = self.conv(x)
         h = h.view(h.size(0), -1)
-        return self.fc_adv(h), self.fc_cls(h)
+        return self.fc_adv(h)
 
 
+class Predictor(nn.Module):
+    
+    def __init__(self):
+        super().__init__()
+        self.hidden_size = 128
+        # ========= create models ===========
+        self.predictor = basenet.ResNet18(n_classes=1, pretrained=True, hidden_size=self.hidden_size, dropout=0.5)
+        # if opt['predictor'] == 'ResNet50':
+        #     self.predictor = basenet.ResNet50(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
+        # elif opt['predictor'] == 'ResNet18':
+        #     self.predictor = basenet.ResNet18(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
+        # elif opt['predictor'] == 'VGG16':
+        #     self.predictor = basenet.Vgg16(n_classes=2, pretrained=True, dropout=opt['dropout']).to(self.device)
+
+    def forward(self, x):
+        out, feature = self.predictor(x)
+        return out
+    
+    def load_weights(self, file_path, optim_pred=None):
+        ckpt = torch.load(file_path)
+        self.predictor.load_state_dict(ckpt["predictor"])
+    
+    def _criterion_pred(self, output, target):
+        # output is logits and target is 0 or 1
+        return F.binary_cross_entropy_with_logits(output, target)
+        
 
 import torch.autograd as autograd
 import torch.nn.functional as F
@@ -129,6 +158,21 @@ import torch.optim as optim
 
 
 # multilabel_soft_margin_loss = sigmoid + binary_cross_entropy
+
+def one_hot_embedding(labels, num_classes):
+    """Embedding labels to one-hot form.
+
+    Args:
+    labels: (LongTensor) class labels, sized [N,].
+    num_classes: (int) number of classes.
+
+    Returns:
+    (tensor) encoded labels, sized [N, #classes].
+    """
+    labels = labels.type(torch.LongTensor)
+    y = torch.eye(num_classes) 
+    res = y[labels].squeeze_()
+    return res
 
 class AttGAN():
     def __init__(self, args):
@@ -160,10 +204,17 @@ class AttGAN():
         self.D.train()
         if self.gpu: self.D.cuda()
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
+
+        self.P = Predictor()
+        self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CelebA/label.pth')
+        self.P.eval()
+        if self.gpu: self.P.cuda()
+        summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
         if self.multi_gpu:
             self.G = nn.DataParallel(self.G)
             self.D = nn.DataParallel(self.D)
+            self.P = nn.DataParallel(self.P)
         
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
@@ -174,29 +225,35 @@ class AttGAN():
         for g in self.optim_D.param_groups:
             g['lr'] = lr
     
-    def trainG(self, img_a, att_a, att_a_, att_b, att_b_):
+    def trainG(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = False
-        
+
         zs_a = self.G(img_a, mode='enc')
-        img_fake = self.G(zs_a, att_b_, mode='dec')
-        img_recon = self.G(zs_a, att_a_, mode='dec')
-        d_fake, dc_fake = self.D(img_fake)
+
+        att_c = torch.ones_like(att_a) / 2
+        # print(att_a)
+        # print(att_c)
+        
+        img_fake = self.G(zs_a, att_c, mode='dec')
+        img_recon = self.G(zs_a, att_a, mode='dec')
+        d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
+        d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
         
         if self.mode == 'wgan':
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
-            gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
+            gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b)
+        gc_loss = self.P._criterion_pred(dc_fake, att_c) + self.P._criterion_pred(dc_recon, att_a)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.gc * gc_loss + self.gr * gr_loss
         
         self.optim_G.zero_grad()
         g_loss.backward()
         self.optim_G.step()
-
+        
         wandb.log({
             'g/total_loss': g_loss.item(),
             'g/fake_loss': gf_loss.item(),
@@ -208,14 +265,17 @@ class AttGAN():
             'gc_loss': gc_loss.item(), 'gr_loss': gr_loss.item()
         }
         return errG
-    
-    def trainD(self, img_a, att_a, att_a_, att_b, att_b_):
+
+    def trainD(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = True
         
-        img_fake = self.G(img_a, att_b_).detach()
-        d_real, dc_real = self.D(img_a)
-        d_fake, dc_fake = self.D(img_fake)
+        # uniform label 0 is between 0.5 and -0.5
+        att_c = torch.ones_like(att_b) / 2
+        
+        img_fake = self.G(img_a, att_c).detach()
+        d_real, dc_real = self.D(img_a), self.P(img_a)
+        d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         
         def gradient_penalty(f, real, fake=None):
             def interpolate(a, b=None):
@@ -254,7 +314,7 @@ class AttGAN():
             df_gp = gradient_penalty(self.D, img_a)
         # print(dc_real.size())
         # print(att_a.size())
-        dc_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
+        dc_loss = self.P._criterion_pred(dc_real, att_a)
         d_loss = df_loss + self.lambda_gp * df_gp + self.dc * dc_loss
         
         self.optim_D.zero_grad()
