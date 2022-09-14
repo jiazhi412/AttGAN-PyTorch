@@ -10,13 +10,12 @@ import datetime
 import json
 import os
 from os.path import join
-import torch.utils.data as data
 import torch
+import torch.utils.data as data
 import torchvision.utils as vutils
 import wandb
 from helpers import Progressbar
 
-from egan_sex_label import AttGAN
 from dataloader.CelebA_ import check_attribute_conflict
 
 
@@ -36,7 +35,7 @@ def parse(args=None):
     
     parser.add_argument('--img_size', dest='img_size', type=int, default=224)
     parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=1) #
-    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=1) #
+    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=0) #
     parser.add_argument('--enc_dim', dest='enc_dim', type=int, default=64)
     parser.add_argument('--dec_dim', dest='dec_dim', type=int, default=64)
     parser.add_argument('--dis_dim', dest='dis_dim', type=int, default=64)
@@ -55,8 +54,9 @@ def parse(args=None):
     parser.add_argument('--gr', dest='gr', type=float, default=100.0) #
     parser.add_argument('--gc', dest='gc', type=float, default=10.0) #
     parser.add_argument('--dc', dest='dc', type=float, default=1.0) #
-    parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0) #
-    parser.add_argument('--dim_per_attr', type=int, default=10) #
+    parser.add_argument('--gp', dest='gp', type=float, default=10.0) #
+    parser.add_argument('--ga', dest='ga', type=float, default=10.0) #
+    parser.add_argument('--dim_per_attr', type=int, default=1) #
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan']) #
     parser.add_argument('--epochs', dest='epochs', type=int, default=50, help='# of epochs')
@@ -76,20 +76,21 @@ def parse(args=None):
     parser.add_argument('--sample_interval', dest='sample_interval', type=int, default=1000)
     parser.add_argument('--no_gpu', dest='gpu', action='store_false')
     parser.add_argument('--multi_gpu', dest='multi_gpu', action='store_true')
-    parser.add_argument('--experiment_name', dest='experiment_name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
+    parser.add_argument("--experiment", metavar="",)
+    parser.add_argument('--name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
     
     return parser.parse_args(args)
 
 args = parse()
 print(args)
 
-hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.lambda_gp}-dpa{args.dim_per_attr}'
+hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.gp}-ga{args.ga}-dpa{args.dim_per_attr}'
 
 wandb.init(project="AttGAN",
             entity="jiazhi", 
             config=args, 
-            group=args.experiment_name, 
-            # job_type=args.experiment_name, 
+            group=args.experiment, 
+            job_type=args.name, 
             name=hyperparameter
 )
 
@@ -97,10 +98,10 @@ args.lr_base = args.lr
 args.n_attrs = len(args.attrs)
 args.betas = (args.beta1, args.beta2)
 
-os.makedirs(join('result', args.experiment_name, hyperparameter), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, hyperparameter, 'sample_training'), exist_ok=True)
-with open(join('result', args.experiment_name, hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, hyperparameter), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, hyperparameter, 'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 if args.data == 'CelebA':
@@ -117,7 +118,12 @@ valid_dataloader = data.DataLoader(
 )
 print('Training images:', len(train_dataset), '/', 'Validating images:', len(valid_dataset))
 
-attgan = AttGAN(args)
+if args.experiment == 'label_mse':
+    from models.CelebA_label_mse import Model
+    attgan = Model(args)
+elif args.experiment == 'label':
+    from models.CelebA_label import AttGAN
+    attgan = AttGAN(args)
 progressbar = Progressbar()
 
 fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
@@ -176,7 +182,8 @@ for epoch in range(args.epochs):
         if (it+1) % (args.n_d+1) != 0:
             errD = attgan.trainD(img_a, att_a, att_b)
         else:
-            errG = attgan.trainG(img_a, att_a, att_b)
+            errG = attgan.trainG_P1(img_a, att_a, att_b)
+            errG = attgan.trainG_P2(img_a, att_a, att_b)
             progressbar.say(epoch=epoch, iter=it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
         
         if (it+1) % args.save_interval == 0:
@@ -184,10 +191,10 @@ for epoch in range(args.epochs):
             # If you'd like to keep weights of G, D, optim_G, optim_D,
             # please use save() instead of saveG().
             attgan.saveG(os.path.join(
-                'result', args.experiment_name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+                'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             ))
             # attgan.save(os.path.join(
-            #     'result', args.experiment_name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
         if (it+1) % args.sample_interval == 0:
             attgan.eval()
@@ -197,7 +204,8 @@ for epoch in range(args.epochs):
                     samples.append(attgan.G(fixed_img_a, att_b))
                 samples = torch.cat(samples, dim=3)
                 vutils.save_image(samples, os.path.join(
-                        'result', args.experiment_name, hyperparameter, 'sample_training',
+                        'result', args.experiment, args.name, hyperparameter, 'sample_training',
                         'Epoch_({:d})_({:d}of{:d}).jpg'.format(epoch, it%it_per_epoch+1, it_per_epoch)
-                    ), nrow=1, normalize=True, range=(0., 1.))
+                    ), nrow=1, normalize=False, range=(0., 1.))
+                wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})
         it += 1

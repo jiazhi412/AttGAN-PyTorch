@@ -8,7 +8,7 @@ python train.py --experiment_name test --sample_interval 1
 python train_color.py --experiment_name color
 
 # CelebA
-python train_sex_label.py --experiment_name midautumn 
+python train_CelebA.py --experiment label_mse --name debug 
 
 # test
 python test_multi.py --experiment_name all --test_atts Male --test_ints 0.5

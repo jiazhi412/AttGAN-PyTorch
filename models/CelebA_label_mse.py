@@ -1,180 +1,18 @@
-# Copyright (C) 2018 Elvis Yu-Jing Lin <elvisyjlin@gmail.com>
-# 
-# This work is licensed under the MIT License. To view a copy of this license,
-# visit https://opensource.org/licenses/MIT.
+"""EGAN"""
 
-"""AttGAN, generator, and discriminator."""
-
-from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
-from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
-import backbones.basenet as basenet
-from torchsummary import summary
-import wandb
-
-
-# This architecture is for images of 128x128
-# In the original AttGAN, slim.conv2d uses padding 'same'
-MAX_DIM = 64 * 16  # 1024
-
-class Generator(nn.Module):
-    def __init__(self, enc_dim=64, enc_layers=5, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
-                 dec_dim=64, dec_layers=5, dec_norm_fn='batchnorm', dec_acti_fn='relu',
-                 n_attrs=1, shortcut_layers=1, inject_layers=1, img_size=224, dim_per_attr = 5):
-        super(Generator, self).__init__()
-        self.shortcut_layers = min(shortcut_layers, dec_layers - 1)
-        self.inject_layers = min(inject_layers, dec_layers - 1)
-        self.f_size = img_size // 2**enc_layers  # f_size = 4 for 128x128
-        self.dim_per_attr = dim_per_attr
-        
-        layers = []
-        n_in = 3
-        for i in range(enc_layers):
-            n_out = min(enc_dim * 2**i, MAX_DIM)
-            layers += [Conv2dBlock(
-                n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=enc_norm_fn, acti_fn=enc_acti_fn
-            )]
-            n_in = n_out
-        self.enc_layers = nn.ModuleList(layers)
-        
-        layers = []
-        dim_attrs = n_attrs * dim_per_attr  
-        n_in = n_in + dim_attrs
-        for i in range(dec_layers):
-            if i < dec_layers - 1:
-                n_out = min(dec_dim * 2**(dec_layers-i-1), MAX_DIM)
-                layers += [ConvTranspose2dBlock(
-                    n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=dec_norm_fn, acti_fn=dec_acti_fn
-                )]
-                n_in = n_out
-                n_in = n_in + n_in//2 if self.shortcut_layers > i else n_in
-                n_in = n_in + dim_attrs if self.inject_layers > i else n_in # inject attr
-            else: # last layer
-                layers += [ConvTranspose2dBlock(
-                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='sigmoid'
-                )]
-        self.dec_layers = nn.ModuleList(layers)
-    
-    def encode(self, x):
-        z = x
-        zs = []
-        for layer in self.enc_layers:
-            z = layer(z)
-            zs.append(z)
-        return zs
-    
-    def decode(self, zs, a):
-        a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
-        # print(a)
-        # print(a_tile)
-        # print(a.size())
-        # print(a_tile.size())
-        z = torch.cat([zs[-1], a_tile], dim=1)
-        for i, layer in enumerate(self.dec_layers):
-            z = layer(z)
-            if self.shortcut_layers > i:  # Concat 1024 with 512
-                z = torch.cat([z, zs[len(self.dec_layers) - 2 - i]], dim=1)
-            if self.inject_layers > i:
-                a_tile = a.view(a.size(0), -1, 1, 1) \
-                          .repeat(1, self.dim_per_attr, self.f_size * 2**(i+1), self.f_size * 2**(i+1))
-                z = torch.cat([z, a_tile], dim=1)
-        return z
-    
-    def forward(self, x, a=None, mode='enc-dec'):
-        if mode == 'enc-dec':
-            assert a is not None, 'No given attribute.'
-            return self.decode(self.encode(x), a)
-        if mode == 'enc':
-            return self.encode(x)
-        if mode == 'dec':
-            assert a is not None, 'No given attribute.'
-            return self.decode(x, a)
-        raise Exception('Unrecognized mode: ' + mode)
-
-class Discriminators(nn.Module):
-    # No instancenorm in fcs in source code, which is different from paper.
-    def __init__(self, dim=64, norm_fn='instancenorm', acti_fn='lrelu',
-                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128, n_attrs=1):
-        super(Discriminators, self).__init__()
-        self.f_size = img_size // 2**n_layers
-        
-        layers = []
-        n_in = 3
-        for i in range(n_layers):
-            n_out = min(dim * 2**i, MAX_DIM)
-            layers += [Conv2dBlock(
-                n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=norm_fn, acti_fn=acti_fn
-            )]
-            n_in = n_out
-        self.conv = nn.Sequential(*layers)
-        self.fc_adv = nn.Sequential(
-            LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-            LinearBlock(fc_dim, 1, 'none', 'none')
-        )
-
-
-        # self.fc_cls = nn.Sequential(
-        #     LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-        #     LinearBlock(fc_dim, 2, 'none', 'none')
-        # )
-    
-    def forward(self, x):
-        h = self.conv(x)
-        h = h.view(h.size(0), -1)
-        return self.fc_adv(h)
-
-
-class Predictor(nn.Module):
-    
-    def __init__(self):
-        super().__init__()
-        self.hidden_size = 128
-        # ========= create models ===========
-        self.predictor = basenet.ResNet18(n_classes=1, pretrained=True, hidden_size=self.hidden_size, dropout=0.5)
-        # if opt['predictor'] == 'ResNet50':
-        #     self.predictor = basenet.ResNet50(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
-        # elif opt['predictor'] == 'ResNet18':
-        #     self.predictor = basenet.ResNet18(n_classes=2, pretrained=True, hidden_size=self.hidden_size, dropout=opt['dropout']).to(self.device)
-        # elif opt['predictor'] == 'VGG16':
-        #     self.predictor = basenet.Vgg16(n_classes=2, pretrained=True, dropout=opt['dropout']).to(self.device)
-
-    def forward(self, x):
-        out, feature = self.predictor(x)
-        return out
-    
-    def load_weights(self, file_path, optim_pred=None):
-        ckpt = torch.load(file_path)
-        self.predictor.load_state_dict(ckpt["predictor"])
-    
-    def _criterion_pred(self, output, target):
-        # output is logits and target is 0 or 1
-        return F.binary_cross_entropy_with_logits(output, target)
-        
-
 import torch.autograd as autograd
 import torch.nn.functional as F
 import torch.optim as optim
+from torchsummary import summary
+import wandb
 
+from backbones import *
+from models.CelebA_label import Model as A
 
-# multilabel_soft_margin_loss = sigmoid + binary_cross_entropy
+class Model(A):
 
-def one_hot_embedding(labels, num_classes):
-    """Embedding labels to one-hot form.
-
-    Args:
-    labels: (LongTensor) class labels, sized [N,].
-    num_classes: (int) number of classes.
-
-    Returns:
-    (tensor) encoded labels, sized [N, #classes].
-    """
-    labels = labels.type(torch.LongTensor)
-    y = torch.eye(num_classes) 
-    res = y[labels].squeeze_()
-    return res
-
-class AttGAN():
     def __init__(self, args):
         self.mode = args.mode
         self.gpu = args.gpu
@@ -182,11 +20,12 @@ class AttGAN():
         self.gr = args.gr
         self.gc = args.gc
         self.dc = args.dc
-        self.lambda_gp = args.lambda_gp
+        self.gp = args.gp
+        self.ga = args.ga
+        self.dim_per_attr = args.dim_per_attr
+        self.f_size = args.img_size // 2**args.enc_layers  # f_size = 4 for 128x128
 
-        # print(args.n_attrs)
-        
-        self.G = Generator(
+        self.G = Generator_no_inject(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
             args.dec_dim, args.dec_layers, args.dec_norm, args.dec_acti,
             args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size,
@@ -196,7 +35,7 @@ class AttGAN():
         if self.gpu: self.G.cuda()
         summary(self.G, [(3, args.img_size, args.img_size), (args.n_attrs, 1, 1)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
-        self.D = Discriminators(
+        self.D = Discriminator(
             args.dis_dim, args.dis_norm, args.dis_acti,
             args.dis_fc_dim, args.dis_fc_norm, args.dis_fc_acti, args.dis_layers, args.img_size,
             args.n_attrs
@@ -218,35 +57,69 @@ class AttGAN():
         
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
+        self.optim_P = optim.Adam(self.P.parameters(), lr=args.lr, betas=args.betas)
     
-    def set_lr(self, lr):
-        for g in self.optim_G.param_groups:
-            g['lr'] = lr
-        for g in self.optim_D.param_groups:
-            g['lr'] = lr
+    def _att_criterion(self, zs, a):
+        a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
+        # print(a_tile.size())
+        # print(zs[-1][:,:self.dim_per_attr,:,:].size())
+        # print('jasjodlas')
+        return F.l1_loss(zs[-1][:,:self.dim_per_attr,:,:], a_tile)
     
-    def trainG(self, img_a, att_a, att_b):
+    # def train():
+    #     if (it+1) % (args.n_d+1) != 0:
+    #         errD = attgan.trainD(img_a, att_a, att_b)
+    #     else:
+    #         errG = attgan.trainG_P1(img_a, att_a, att_b)
+    #         errG = attgan.trainG_P2(img_a, att_a, att_b)
+    #         progressbar.say(epoch=epoch, iter=it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
+    
+    def trainG_P1(self, img_a, att_a, att_b):
+        for p in self.D.parameters():
+            p.requires_grad = False
+        zs_a = self.G(img_a, mode='enc')
+        att_loss = self._att_criterion(zs_a, att_a)
+        
+        img_recon = self.G(zs_a, att_a, mode='dec')
+        d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
+
+        gc_loss = self.P._criterion_pred(dc_recon, att_a)
+        gr_loss = F.l1_loss(img_recon, img_a)
+        g_loss =  self.ga * att_loss + self.gc * gc_loss + self.gr * gr_loss
+
+        self.optim_G.zero_grad()
+        g_loss.backward()
+        self.optim_G.step()
+        
+        wandb.log({
+            'g1/total_loss': g_loss.item(),
+            'g1/att_loss': att_loss.item(),
+            'g1/classifier_loss': gc_loss.item(),
+            'g1/reconstuct_loss': gr_loss.item(),
+            })
+        errG = {
+            'g_loss': g_loss.item(), 
+        }
+        return errG 
+
+    
+    def trainG_P2(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = False
 
         zs_a = self.G(img_a, mode='enc')
-
-        att_c = torch.ones_like(att_a) / 2
-        # print(att_a)
-        # print(att_c)
-        
-        img_fake = self.G(zs_a, att_c, mode='dec')
+        img_fake = self.G(zs_a, att_b, mode='dec')
         img_recon = self.G(zs_a, att_a, mode='dec')
         d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
-        
+
         if self.mode == 'wgan':
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
             gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = self.P._criterion_pred(dc_fake, att_c) + self.P._criterion_pred(dc_recon, att_a)
+        gc_loss = self.P._criterion_pred(dc_fake, att_b) + self.P._criterion_pred(dc_recon, att_a)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.gc * gc_loss + self.gr * gr_loss
         
@@ -255,10 +128,10 @@ class AttGAN():
         self.optim_G.step()
         
         wandb.log({
-            'g/total_loss': g_loss.item(),
-            'g/fake_loss': gf_loss.item(),
-            'g/classifier_loss': gc_loss.item(),
-            'g/reconstuct_loss': gr_loss.item(),
+            'g2/total_loss': g_loss.item(),
+            'g2/fake_loss': gf_loss.item(),
+            'g2/classifier_loss': gc_loss.item(),
+            'g2/reconstuct_loss': gr_loss.item(),
             })
         errG = {
             'g_loss': g_loss.item(), 'gf_loss': gf_loss.item(),
@@ -273,7 +146,7 @@ class AttGAN():
         # uniform label 0 is between 0.5 and -0.5
         att_c = torch.ones_like(att_b) / 2
         
-        img_fake = self.G(img_a, att_c).detach()
+        img_fake = self.G(img_a, att_b).detach()
         d_real, dc_real = self.D(img_a), self.P(img_a)
         d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         
@@ -315,7 +188,7 @@ class AttGAN():
         # print(dc_real.size())
         # print(att_a.size())
         dc_loss = self.P._criterion_pred(dc_real, att_a)
-        d_loss = df_loss + self.lambda_gp * df_gp + self.dc * dc_loss
+        d_loss = df_loss + self.gp * df_gp + self.dc * dc_loss
         
         self.optim_D.zero_grad()
         d_loss.backward()

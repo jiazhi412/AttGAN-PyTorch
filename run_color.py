@@ -3,13 +3,15 @@ import os
 from itertools import product
 from re import escape
 
+if not os.path.exists('outputs'):
+    os.makedirs('outputs')
+
 # parameters
-command_template = 'python train_sex_label.py --experiment_name {} --gc {} --dim_per_attr {} --inject_layers {}'
-p1 = ['midautumn']
-p2 = [10,15,20]
-p3 = [1,5]
-p4 = [1,2,3]
-# p4 = [4, 8, 16, 32]
+command_template = 'python train_color.py --experiment_name {} --inject_layers {} --gc {} --dim_per_attr {} '
+p1 = ['913']
+p2 = [0,2]
+p3 = [50,100,200,300,1000]
+p4 = [1,100]
 
 
 for p1, p2, p3, p4 in product(p1, p2, p3, p4):

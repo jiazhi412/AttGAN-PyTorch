@@ -60,10 +60,10 @@ def parse(args=None):
     parser.add_argument('--gc', dest='gc', type=float, default=10.0) #
     parser.add_argument('--dc', dest='dc', type=float, default=1.0) #
     parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0) #
-    parser.add_argument('--dim_per_attr', type=int, default=1) #
+    parser.add_argument('--dim_per_attr', type=int, default=5) #
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
-    parser.add_argument('--epochs', dest='epochs', type=int, default=200, help='# of epochs')
+    parser.add_argument('--epochs', dest='epochs', type=int, default=100, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
     parser.add_argument('--num_workers', dest='num_workers', type=int, default=4)
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')
@@ -78,7 +78,7 @@ def parse(args=None):
     
     parser.add_argument('--save_interval', dest='save_interval', type=int, default=1000)
     parser.add_argument('--sample_interval', dest='sample_interval', type=int, default=1000)
-    parser.add_argument('--gpu', dest='gpu', action='store_true')
+    parser.add_argument('--no_gpu', dest='gpu', action='store_false')
     parser.add_argument('--multi_gpu', dest='multi_gpu', action='store_true')
     parser.add_argument('--experiment_name', dest='experiment_name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
     
@@ -192,4 +192,7 @@ for epoch in range(args.epochs):
                         'result', args.experiment_name, hyperparameter,  'sample_training',
                         'Epoch_({:d})_({:d}of{:d}).jpg'.format(epoch, it%it_per_epoch+1, it_per_epoch)
                     ), nrow=1, normalize=False, range=(0., 1.))
+                wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})
         it += 1
+
+        
