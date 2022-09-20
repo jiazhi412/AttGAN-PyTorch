@@ -7,9 +7,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchsummary import summary
 import wandb
+from helpers import Progressbar
+import os
+import torchvision.utils as vutils
+import itertools
 
 from backbones import *
 from models.CelebA_label import Model as A
+from dataloader.CelebA_ import check_attribute_conflict
 
 class Model(A):
 
@@ -22,8 +27,15 @@ class Model(A):
         self.dc = args.dc
         self.gp = args.gp
         self.ga = args.ga
+        # self.gf = args.gf
         self.dim_per_attr = args.dim_per_attr
         self.f_size = args.img_size // 2**args.enc_layers  # f_size = 4 for 128x128
+        
+        self.scheduler = itertools.cycle([0] * args.num_ganp1 + [1] * args.num_ganp2 + [2] * args.num_dis)
+        self.hyperparameter = args.hyperparameter
+
+        self.epoch = 0
+        self.it = 0
 
         self.G = Generator_no_inject(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
@@ -44,7 +56,8 @@ class Model(A):
         if self.gpu: self.D.cuda()
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
 
-        self.P = Predictor()
+        # TODO keep training 
+        self.P = Predictor() # TODO encoder fixed, classifier retrain
         self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CelebA/label.pth')
         self.P.eval()
         if self.gpu: self.P.cuda()
@@ -59,33 +72,139 @@ class Model(A):
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
         self.optim_P = optim.Adam(self.P.parameters(), lr=args.lr, betas=args.betas)
     
-    def _att_criterion(self, zs, a):
+    def _att_criterion(self, zs, a, which_loss='l1'):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
-        # print(a_tile.size())
-        # print(zs[-1][:,:self.dim_per_attr,:,:].size())
-        # print('jasjodlas')
-        return F.l1_loss(zs[-1][:,:self.dim_per_attr,:,:], a_tile)
+        if which_loss == 'mse':
+            loss = F.mse_loss(zs[:,:self.dim_per_attr,:,:], a_tile)
+        elif which_loss == 'l1':
+            loss = F.l1_loss(zs[:,:self.dim_per_attr,:,:], a_tile)
+        return loss
     
-    # def train():
-    #     if (it+1) % (args.n_d+1) != 0:
-    #         errD = attgan.trainD(img_a, att_a, att_b)
-    #     else:
-    #         errG = attgan.trainG_P1(img_a, att_a, att_b)
-    #         errG = attgan.trainG_P2(img_a, att_a, att_b)
-    #         progressbar.say(epoch=epoch, iter=it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
+    def train_epoch(self, train_dataloader, valid_dataloader, it_per_epoch, args):
+        progressbar = Progressbar()
+        # train with base lr in the first 100 epochs
+        # and half the lr in the last 100 epochs
+        lr = args.lr_base / (10 ** (self.epoch // 100))
+        self.set_lr(lr)
+        
+        # start iteration
+        errG1, errG2, errD = None, None, None
+        for img_a, att_a in progressbar(train_dataloader):
+            # prepare data
+            att_a = torch.unsqueeze(att_a,1) if len(list(att_a.size())) == 1 else att_a
+            img_a = img_a.cuda() if args.gpu else img_a
+            att_a = att_a.cuda() if args.gpu else att_a
+            att_b = 1 - att_a
+            att_a = att_a.type(torch.float)
+            att_b = att_b.type(torch.float)
+        
+            att_a_ = (att_a * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+            att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+
+            # train model
+            phase = next(self.scheduler)
+            self.train()
+            if phase == 0:
+                errG1 = self.trainG_P1(img_a, att_a, att_a_, att_b, att_b_)
+            elif phase == 1:
+                errG2 = self.trainG_P2(img_a, att_a, att_a,  att_b, att_b_)
+            elif phase == 2:
+                errD = self.trainD(img_a, att_a, att_a_, att_b, att_b_)
+            if errD and errG1 and errG2:
+                progressbar.say(epoch=self.epoch, iter=self.it+1, d_loss=errD['d_loss'], g1_loss=errG1['g_loss'] , g2_loss=errG2['g_loss'])
+
+            # errG1, errG2, errD = self.train_iter(img_a, att_a, att_a_, att_b, att_b_)
+        
+
+            self.save_model(args)
+
+            self.eval_model(valid_dataloader, it_per_epoch, args)
+
+            self.it += 1
+        self.epoch += 1
+
+    # def train_iter(self, img_a, att_a, att_a_, att_b, att_b_):
+    #     # train model
+    #     phase = next(self.scheduler)
+    #     self.train()
+    #     if phase == 0:
+    #         errG1 = self.trainG_P1(img_a, att_a, att_a_, att_b, att_b_)
+    #     elif phase == 1:
+    #         errG2 = self.trainG_P2(img_a, att_a, att_a,  att_b, att_b_)
+    #     elif phase == 2:
+    #         errD = self.trainD(img_a, att_a, att_a_, att_b, att_b_)
+    #         progressbar.say(epoch=self.epoch, iter=self.it+1, d_loss=errD['d_loss'], g1_loss=errG1['g_loss'] , g2_loss=errG2['g_loss'])
+    #     return errG1, errG2, errD
+        
+
+    def save_model(self, args):
+        # save model
+        if (self.it+1) % args.save_interval == 0:
+            # To save storage space, I only checkpoint the weights of G.
+            # If you'd like to keep weights of G, D, optim_G, optim_D,
+            # please use save() instead of saveG().
+            self.saveG(os.path.join(
+                'result', args.experiment, args.name, self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
+            ))
+            # self.save(os.path.join(
+            #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            # ))
+
+                
+                
     
-    def trainG_P1(self, img_a, att_a, att_b):
+    
+    
+    def eval_model(self, valid_dataloader, it_per_epoch, args):
+        fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
+        fixed_att_a = torch.unsqueeze(fixed_att_a,1) if len(list(fixed_att_a.size())) == 1 else fixed_att_a
+        fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
+        fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
+        fixed_att_a = fixed_att_a.type(torch.float)
+        sample_att_b_list = [fixed_att_a]
+        for i in range(args.n_attrs):
+            tmp = fixed_att_a.clone()
+            tmp[:, i] = 1 - tmp[:, i]
+            tmp = check_attribute_conflict(tmp, args.attrs[i], args.attrs)
+            sample_att_b_list.append(tmp)
+
+        # eval model
+        if (self.it+1) % args.sample_interval == 0:
+            self.eval()
+            with torch.no_grad():
+                samples = [fixed_img_a]
+                for i, att_b in enumerate(sample_att_b_list):
+                    att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+                    if i > 0: # i == 0 is for reconstruction
+                        att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int # -1, 1 for interested att; -1/2, 1/2 for others
+                    samples.append(self.G(fixed_img_a, att_b_))
+                    # print(i)
+                    # print(att_b_)
+                samples.append(self.G(fixed_img_a, torch.zeros_like(att_b_)))
+                samples = torch.cat(samples, dim=3)
+                vutils.save_image(samples, os.path.join(
+                        'result', args.experiment, args.name, self.hyperparameter, 'sample_training',
+                        'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
+                    ), nrow=1, normalize=False, range=(0., 1.))
+                wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})
+    
+    
+    
+    
+
+    
+    def trainG_P1(self, img_a, att_a, att_a_, att_b, att_b_):
         for p in self.D.parameters():
             p.requires_grad = False
+
         zs_a = self.G(img_a, mode='enc')
-        att_loss = self._att_criterion(zs_a, att_a)
-        
-        img_recon = self.G(zs_a, att_a, mode='dec')
+        ga_loss = self._att_criterion(zs_a[-1], att_a_)
+        img_recon = self.G(zs_a[-1], att_a_, mode='dec')
         d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
 
         gc_loss = self.P._criterion_pred(dc_recon, att_a)
         gr_loss = F.l1_loss(img_recon, img_a)
-        g_loss =  self.ga * att_loss + self.gc * gc_loss + self.gr * gr_loss
+        g_loss =  self.ga * ga_loss + self.gc * gc_loss + self.gr * gr_loss
 
         self.optim_G.zero_grad()
         g_loss.backward()
@@ -93,7 +212,7 @@ class Model(A):
         
         wandb.log({
             'g1/total_loss': g_loss.item(),
-            'g1/att_loss': att_loss.item(),
+            'g1/attribute_loss': ga_loss.item(),
             'g1/classifier_loss': gc_loss.item(),
             'g1/reconstuct_loss': gr_loss.item(),
             })
@@ -103,13 +222,15 @@ class Model(A):
         return errG 
 
     
-    def trainG_P2(self, img_a, att_a, att_b):
+    def trainG_P2(self, img_a, att_a, att_a_, att_b, att_b_):
         for p in self.D.parameters():
             p.requires_grad = False
 
         zs_a = self.G(img_a, mode='enc')
-        img_fake = self.G(zs_a, att_b, mode='dec')
-        img_recon = self.G(zs_a, att_a, mode='dec')
+        # att_loss = self._att_criterion(zs_a, att_a_) + self._att_criterion(zs_a)
+
+        img_fake = self.G(zs_a[-1].detach(), att_b_, mode='dec_erase')
+        img_recon = self.G(zs_a[-1].detach(), att_a_, mode='dec_erase')
         d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
 
@@ -139,14 +260,14 @@ class Model(A):
         }
         return errG
 
-    def trainD(self, img_a, att_a, att_b):
+    def trainD(self, img_a, att_a, att_a_, att_b, att_b_):
         for p in self.D.parameters():
             p.requires_grad = True
         
-        # uniform label 0 is between 0.5 and -0.5
-        att_c = torch.ones_like(att_b) / 2
+        # # uniform label
+        # att_c = torch.ones_like(att_b) / 2
         
-        img_fake = self.G(img_a, att_b).detach()
+        img_fake = self.G(img_a, att_b_).detach()
         d_real, dc_real = self.D(img_a), self.P(img_a)
         d_fake, dc_fake = self.D(img_fake), self.P(img_fake)
         
@@ -187,21 +308,24 @@ class Model(A):
             df_gp = gradient_penalty(self.D, img_a)
         # print(dc_real.size())
         # print(att_a.size())
-        dc_loss = self.P._criterion_pred(dc_real, att_a)
-        d_loss = df_loss + self.gp * df_gp + self.dc * dc_loss
+        # dc_loss = self.P._criterion_pred(dc_real, att_a)
+        # d_loss = df_loss + self.gp * df_gp + self.dc * dc_loss
+        d_loss = df_loss + self.gp * df_gp
         
         self.optim_D.zero_grad()
         d_loss.backward()
         self.optim_D.step()
         
         errD = {
-            'd_loss': d_loss.item(), 'df_loss': df_loss.item(), 
-            'df_gp': df_gp.item(), 'dc_loss': dc_loss.item()
+            'd_loss': d_loss.item(), 
+            'df_loss': df_loss.item(), 
+            'df_gp': df_gp.item(), 
+            # 'dc_loss': dc_loss.item()
         }
         wandb.log({
             'd/total_loss': d_loss.item(),
             'd/fake_loss': df_loss.item(),
-            'd/classifier_loss': dc_loss.item(),
+            # 'd/classifier_loss': dc_loss.item(),
             'd/df_gp_loss': df_gp.item(),
             })
         return errD

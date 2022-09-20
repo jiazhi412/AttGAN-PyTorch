@@ -7,6 +7,7 @@
 
 import os
 from glob import glob
+import pickle
 
 
 def find_model(path, epoch='latest'):
@@ -18,3 +19,8 @@ def find_model(path, epoch='latest'):
     assert os.path.exists(file), 'File not found: ' + file
     print('Find model of {} epoch: {}'.format(epoch, file))
     return file
+
+def load_pkl(load_path):
+    with open(load_path, "rb") as f:
+        pkl_data = pickle.load(f)
+    return pkl_data

@@ -15,7 +15,7 @@ import torch.utils.data as data
 
 import torch
 import torchvision.utils as vutils
-from attgan import AttGAN
+from models.attgan import AttGAN
 from dataloader.CelebA_origin import check_attribute_conflict
 from helpers import Progressbar, add_scalar_dict
 from tensorboardX import SummaryWriter
@@ -164,7 +164,7 @@ for epoch in range(args.epochs):
         att_a = att_a.type(torch.float)
         att_b = att_b.type(torch.float)
         
-        att_a_ = (att_a * 2 - 1) * args.thres_int
+        att_a_ = (att_a * 2 - 1) * args.thres_int # -1/2, 1/2 for all
         # print(att_a)
         # print(att_a_)
         if args.b_distribution == 'none':
@@ -179,12 +179,14 @@ for epoch in range(args.epochs):
                      (2 * args.thres_int)
         
         if (it+1) % (args.n_d+1) != 0:
+            # print('dlkjasdj')
             errD = attgan.trainD(img_a, att_a, att_a_, att_b, att_b_)
             # add_scalar_dict(writer, errD, it+1, 'D')
         else:
             errG = attgan.trainG(img_a, att_a, att_a_, att_b, att_b_)
             # add_scalar_dict(writer, errG, it+1, 'G')
             progressbar.say(epoch=epoch, iter=it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
+            # progressbar.say(epoch=epoch, iter=it+1, g_loss=errG['g_loss'])
         
         if (it+1) % args.save_interval == 0:
             # To save storage space, I only checkpoint the weights of G.
@@ -201,9 +203,9 @@ for epoch in range(args.epochs):
             with torch.no_grad():
                 samples = [fixed_img_a]
                 for i, att_b in enumerate(sample_att_b_list):
-                    att_b_ = (att_b * 2 - 1) * args.thres_int
-                    if i > 0:
-                        att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int
+                    att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+                    if i > 0: # i == 0 is for reconstruction
+                        att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int # -1, 1 for interested att; -1/2, 1/2 for others
                     samples.append(attgan.G(fixed_img_a, att_b_))
                 samples.append((samples[-1] + samples[-2])/2)
                 samples.append(attgan.G(fixed_img_a, torch.zeros_like(att_b_)))

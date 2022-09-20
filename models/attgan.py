@@ -64,10 +64,12 @@ class Generator(nn.Module):
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
         z = torch.cat([zs[-1], a_tile], dim=1)
-        # print(a.size())
-        # print(a_tile.size())
-        # print(zs[-1].size())
-        # print(z.size())
+        # print(a.max())
+        # print(a.min())
+        # print(a)
+        # print(zs[-1].max())
+        # print(zs[-1].min())
+        # print('hahsda')
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
             if self.shortcut_layers > i:  # Concat 1024 with 512
@@ -150,7 +152,7 @@ class AttGAN():
         )
         self.G.train()
         if self.gpu: self.G.cuda()
-        summary(self.G, [(3, args.img_size, args.img_size), (args.n_attrs, 1, 1)], batch_size=4, device='cuda' if args.gpu else 'cpu')
+        # summary(self.G, [(3, args.img_size, args.img_size), (args.n_attrs, 1, 1)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
         self.D = Discriminators(
             args.dis_dim, args.dis_norm, args.dis_acti,
@@ -183,7 +185,7 @@ class AttGAN():
         img_recon = self.G(zs_a, att_a_, mode='dec')
         d_fake, dc_fake = self.D(img_fake)
         
-        if self.mode == 'wgan':
+        if self.mode == 'wgan':    
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
             gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
@@ -240,7 +242,7 @@ class AttGAN():
             gp = ((norm - 1.0) ** 2).mean()
             return gp
         
-        if self.mode == 'wgan':
+        if self.mode == 'wgan': # discriminator becomes critic
             wd = d_real.mean() - d_fake.mean()
             df_loss = -wd
             df_gp = gradient_penalty(self.D, img_a, img_fake)
@@ -248,7 +250,7 @@ class AttGAN():
             df_loss = F.mse_loss(d_real, torch.ones_like(d_fake)) + \
                       F.mse_loss(d_fake, torch.zeros_like(d_fake))
             df_gp = gradient_penalty(self.D, img_a)
-        if self.mode == 'dcgan':  # sigmoid_cross_entropy
+        if self.mode == 'dcgan': # Deep Convolutional gan  # sigmoid_cross_entropy 
             df_loss = F.binary_cross_entropy_with_logits(d_real, torch.ones_like(d_real)) + \
                       F.binary_cross_entropy_with_logits(d_fake, torch.zeros_like(d_fake))
             df_gp = gradient_penalty(self.D, img_a)

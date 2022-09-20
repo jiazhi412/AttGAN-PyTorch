@@ -21,11 +21,18 @@ class Generator_no_inject(nn.Module):
         layers = []
         n_in = 3
         for i in range(enc_layers):
-            n_out = min(enc_dim * 2**i, MAX_DIM)
-            layers += [Conv2dBlock(
-                n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=enc_norm_fn, acti_fn=enc_acti_fn
-            )]
-            n_in = n_out
+            if i < enc_layers - 1:
+                n_out = min(enc_dim * 2**i, MAX_DIM)
+                layers += [Conv2dBlock(
+                    n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=enc_norm_fn, acti_fn=enc_acti_fn
+                )]
+                n_in = n_out
+            else:
+                n_out = min(enc_dim * 2**i, MAX_DIM)
+                layers += [Conv2dBlock(
+                    n_in, n_out, (4, 4), stride=2, padding=1, norm_fn=enc_norm_fn, acti_fn='tanh'
+                )]
+                n_in = n_out
         self.enc_layers = nn.ModuleList(layers)
         
         layers = []
@@ -52,28 +59,38 @@ class Generator_no_inject(nn.Module):
             z = layer(z)
             zs.append(z)
         return zs
-    
-    def decode(self, zs, a, phase='normal'):
-        if phase == 'erase':
-            a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
-            zs[-1][:,:self.dim_per_attr,:,:] = a_tile 
 
-        z = zs[-1]
-        # print(z.size())
+    def decode(self, z, a, phase='normal'):
+        if phase == 'erase':
+            z = z.clone()
+            a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
+            z[:,:self.dim_per_attr,:,:] = a_tile 
+            # print(z.size())
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
-            if self.shortcut_layers > i:  # Concat 1024 with 512
-                z = torch.cat([z, zs[len(self.dec_layers) - 2 - i]], dim=1)
-            # if self.inject_layers > i:
-            #     a_tile = a.view(a.size(0), -1, 1, 1) \
-            #               .repeat(1, self.dim_per_attr, self.f_size * 2**(i+1), self.f_size * 2**(i+1))
-            #     z = torch.cat([z, a_tile], dim=1)
         return z
+    
+    # def decode(self, zs, a, phase='normal'):
+    #     if phase == 'erase':
+    #         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
+    #         zs[:,:self.dim_per_attr,:,:] = a_tile 
+
+    #     z = zs[-1]
+    #     # print(z.size())
+    #     for i, layer in enumerate(self.dec_layers):
+    #         z = layer(z)
+    #         # if self.shortcut_layers > i:  # Concat 1024 with 512
+    #         #     z = torch.cat([z, zs[len(self.dec_layers) - 2 - i]], dim=1)
+    #         # if self.inject_layers > i:
+    #         #     a_tile = a.view(a.size(0), -1, 1, 1) \
+    #         #               .repeat(1, self.dim_per_attr, self.f_size * 2**(i+1), self.f_size * 2**(i+1))
+    #         #     z = torch.cat([z, a_tile], dim=1)
+    #     return z
     
     def forward(self, x, a=None, mode='enc-dec'):
         if mode == 'enc-dec':
             assert a is not None, 'No given attribute.'
-            return self.decode(self.encode(x), a, phase='erase')
+            return self.decode(self.encode(x)[-1], a, phase='erase')
         if mode == 'enc':
             return self.encode(x)
         if mode == 'dec':

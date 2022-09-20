@@ -19,28 +19,20 @@ import wandb
 from helpers import Progressbar
 from torchvision import datasets, transforms
 
-from egan_color import AttGAN
+from models.CMNIST import AttGAN
 from dataloader.CMNIST import ColoredDataset_generated
 
-
-
-# attrs_default = [
-#     'Bald', 'Bangs', 'Black_Hair', 'Blond_Hair', 'Brown_Hair', 'Bushy_Eyebrows',
-#     'Eyeglasses', 'Male', 'Mouth_Slightly_Open', 'Mustache', 'No_Beard', 'Pale_Skin', 'Young'
-# ]
 
 def parse(args=None):
     parser = argparse.ArgumentParser()
     
-    # parser.add_argument('--attrs', dest='attrs', default=attrs_default, nargs='+', help='attributes to learn')
     parser.add_argument('--data', dest='data', type=str, default='CMNIST')
     parser.add_argument('--data_path', dest='data_path', type=str, default="/nas/vista-ssd01/users/jiazli/datasets/MNIST")
-    # parser.add_argument('--attr_path', dest='attr_path', type=str, default='../../datasets/CelebA/raw_data/list_attr_celeba.txt')
-    # parser.add_argument('--image_list_path', dest='image_list_path', type=str, default='../../datasets/CelebA/raw_image_list.txt')
+    parser.add_argument("--biased_var", type=float, default=-1) # -1 uniformly
     
     parser.add_argument('--img_size', dest='img_size', type=int, default=32)
     parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=1)
-    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=1)
+    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=0)
     parser.add_argument('--enc_dim', dest='enc_dim', type=int, default=64)
     parser.add_argument('--dec_dim', dest='dec_dim', type=int, default=64)
     parser.add_argument('--dis_dim', dest='dis_dim', type=int, default=64)
@@ -57,13 +49,13 @@ def parse(args=None):
     parser.add_argument('--dis_acti', dest='dis_acti', type=str, default='lrelu')
     parser.add_argument('--dis_fc_acti', dest='dis_fc_acti', type=str, default='relu')
     parser.add_argument('--gr', dest='gr', type=float, default=100.0) #
-    parser.add_argument('--gc', dest='gc', type=float, default=10.0) #
+    parser.add_argument('--gc', dest='gc', type=float, default=300.0) #
     parser.add_argument('--dc', dest='dc', type=float, default=1.0) #
     parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0) #
-    parser.add_argument('--dim_per_attr', type=int, default=5) #
+    parser.add_argument('--dim_per_attr', type=int, default=100) #
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
-    parser.add_argument('--epochs', dest='epochs', type=int, default=100, help='# of epochs')
+    parser.add_argument('--epochs', dest='epochs', type=int, default=50, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
     parser.add_argument('--num_workers', dest='num_workers', type=int, default=4)
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')
@@ -93,7 +85,7 @@ wandb.init(project="AttGAN",
             entity="jiazhi", 
             config=args, 
             group=args.experiment_name, 
-            # job_type=args.experiment_name, 
+            job_type=str(args.biased_var), 
             name=hyperparameter
 )
 
@@ -101,10 +93,10 @@ args.lr_base = args.lr
 args.n_attrs = 3 # RGB
 args.betas = (args.beta1, args.beta2)
 
-os.makedirs(join('result', args.experiment_name), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, hyperparameter,  'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, hyperparameter,  'sample_training'), exist_ok=True)
-with open(join('result', args.experiment_name, hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment_name, str(args.biased_var)), exist_ok=True)
+os.makedirs(join('result', args.experiment_name, str(args.biased_var), hyperparameter,  'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment_name, str(args.biased_var), hyperparameter,  'sample_training'), exist_ok=True)
+with open(join('result', args.experiment_name, str(args.biased_var), hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 if args.data == 'CMNIST':
@@ -117,21 +109,19 @@ if args.data == 'CMNIST':
     test_set_grey = datasets.MNIST(root=args.data_path, train=False, download=False, transform=transform)
     train_set_grey, dev_set_grey = torch.utils.data.random_split(train_set_grey, [50000, 10000])
 
-    train_dataset = ColoredDataset_generated(train_set_grey, var=-1)
-    valid_dataset = ColoredDataset_generated(dev_set_grey, var=-1)
-    test_set = ColoredDataset_generated(test_set_grey, var=-1)
+    train_dataset = ColoredDataset_generated(train_set_grey, var=args.biased_var)
+    valid_dataset = ColoredDataset_generated(dev_set_grey, var=args.biased_var)
+    test_set = ColoredDataset_generated(test_set_grey, var=args.biased_var)
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True)
+    test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True)
 
 
 print('Training images:', len(train_dataset), '/', 'Validating images:', len(valid_dataset))
 
 attgan = AttGAN(args)
 progressbar = Progressbar()
-#writer = SummaryWriter(join('result', args.experiment_name, hyperparameter, 'summary'))
-
 
 fixed_img_a, y, fixed_att_a = next(iter(valid_dataloader))
 fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
@@ -175,10 +165,10 @@ for epoch in range(args.epochs):
             # If you'd like to keep weights of G, D, optim_G, optim_D,
             # please use save() instead of saveG().
             attgan.saveG(os.path.join(
-                'result', args.experiment_name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+                'result', args.experiment_name, str(args.biased_var), hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             ))
             # attgan.save(os.path.join(
-            #     'result', args.experiment_name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            #     'result', args.experiment_name, str(args.biased_var), hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
         if (it+1) % args.sample_interval == 0:
             attgan.eval()
@@ -189,7 +179,7 @@ for epoch in range(args.epochs):
                 samples = torch.cat(samples, dim=3)
                 # writer.add_image('sample', vutils.make_grid(samples, nrow=1, normalize=True, range=(-1., 1.)), it+1)
                 vutils.save_image(samples, os.path.join(
-                        'result', args.experiment_name, hyperparameter,  'sample_training',
+                        'result', args.experiment_name, str(args.biased_var), hyperparameter, 'sample_training',
                         'Epoch_({:d})_({:d}of{:d}).jpg'.format(epoch, it%it_per_epoch+1, it_per_epoch)
                     ), nrow=1, normalize=False, range=(0., 1.))
                 wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

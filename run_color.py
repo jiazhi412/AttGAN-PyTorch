@@ -8,7 +8,7 @@ if not os.path.exists('outputs'):
 
 # parameters
 command_template = 'python train_color.py --experiment_name {} --inject_layers {} --gc {} --dim_per_attr {} '
-p1 = ['913']
+p1 = ['color_913']
 p2 = [0,2]
 p3 = [50,100,200,300,1000]
 p4 = [1,100]

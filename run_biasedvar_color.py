@@ -5,22 +5,18 @@ from re import escape
 
 if not os.path.exists('outputs'):
     os.makedirs('outputs')
-if not os.path.exists('errors'):
-    os.makedirs('errors')
 
 # parameters
-command_template = 'python train_CelebA.py --experiment {} --name {} --gr {} --gc {} --ga {} --dim_per_attr {}'
-p1 = ['label_mse']
-p2 = ['920']
-p3 = [100, 50, 200] # gr
-p4 = [10] # gc
-p5 = [5] # ga
-p6 = [1] #dpa
+command_template = 'python train_CMNIST.py --experiment_name {} --biased_var {} --inject_layers {}  --dim_per_attr {} '
+p1 = ['color_evening_915']
+p2 = [0, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, -1]
+p3 = [0]
+p4 = [1,100]
 
 
-for p1, p2, p3, p4, p5, p6 in product(p1, p2, p3, p4, p5, p6):
-    command = command_template.format(p1, p2, p3, p4, p5, p6)
-    job_name = f'{p1}-{p2}-{p3}-{p4}-{p5}-{p6}'
+for p1, p2, p3, p4 in product(p1, p2, p3, p4):
+    command = command_template.format(p1, p2, p3, p4)
+    job_name = f'{p1}-{p2}-{p3}-{p4}'
     bash_file = '{}.sh'.format(job_name)
     with open( bash_file, 'w' ) as OUT:
         OUT.write('#!/bin/bash\n')
@@ -35,7 +31,7 @@ for p1, p2, p3, p4, p5, p6 in product(p1, p2, p3, p4, p5, p6):
         OUT.write('#SBATCH --time=5-00:00:00 \n')
         OUT.write('#SBATCH --exclude=vista[06,07,10,11,13,17-20] \n')
         OUT.write('#SBATCH --output=outputs/{}.out \n'.format(job_name))
-        OUT.write('#SBATCH --error=errors/{}.out \n'.format(job_name))
+        OUT.write('#SBATCH --error=outputs/{}.out \n'.format(job_name))
         OUT.write('source ~/.bashrc\n')
         OUT.write('conda activate pytorch\n')
         OUT.write(command)
