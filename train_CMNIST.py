@@ -52,10 +52,10 @@ def parse(args=None):
     parser.add_argument('--gc', dest='gc', type=float, default=300.0) #
     parser.add_argument('--dc', dest='dc', type=float, default=1.0) #
     parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0) #
-    parser.add_argument('--dim_per_attr', type=int, default=100) #
+    parser.add_argument('--dim_per_attr', type=int, default=10) #
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
-    parser.add_argument('--epochs', dest='epochs', type=int, default=50, help='# of epochs')
+    parser.add_argument('--epochs', dest='epochs', type=int, default=5, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
     parser.add_argument('--num_workers', dest='num_workers', type=int, default=4)
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')

@@ -64,12 +64,6 @@ class Generator(nn.Module):
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
         z = torch.cat([zs[-1], a_tile], dim=1)
-        # print(a.max())
-        # print(a.min())
-        # print(a)
-        # print(zs[-1].max())
-        # print(zs[-1].min())
-        # print('hahsda')
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
             if self.shortcut_layers > i:  # Concat 1024 with 512

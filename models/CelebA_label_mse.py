@@ -1,5 +1,3 @@
-"""EGAN"""
-
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
@@ -8,13 +6,10 @@ import torch.optim as optim
 from torchsummary import summary
 import wandb
 from helpers import Progressbar
-import os
-import torchvision.utils as vutils
 import itertools
 
-from backbones import *
+from models.module import *
 from models.CelebA_label import Model as A
-from dataloader.CelebA_ import check_attribute_conflict
 
 class Model(A):
 
@@ -72,7 +67,7 @@ class Model(A):
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
         self.optim_P = optim.Adam(self.P.parameters(), lr=args.lr, betas=args.betas)
     
-    def _att_criterion(self, zs, a, which_loss='l1'):
+    def _attr_criterion(self, zs, a, which_loss='l1'):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
         if which_loss == 'mse':
             loss = F.mse_loss(zs[:,:self.dim_per_attr,:,:], a_tile)
@@ -123,82 +118,16 @@ class Model(A):
             self.it += 1
         self.epoch += 1
 
-    # def train_iter(self, img_a, att_a, att_a_, att_b, att_b_):
-    #     # train model
-    #     phase = next(self.scheduler)
-    #     self.train()
-    #     if phase == 0:
-    #         errG1 = self.trainG_P1(img_a, att_a, att_a_, att_b, att_b_)
-    #     elif phase == 1:
-    #         errG2 = self.trainG_P2(img_a, att_a, att_a,  att_b, att_b_)
-    #     elif phase == 2:
-    #         errD = self.trainD(img_a, att_a, att_a_, att_b, att_b_)
-    #         progressbar.say(epoch=self.epoch, iter=self.it+1, d_loss=errD['d_loss'], g1_loss=errG1['g_loss'] , g2_loss=errG2['g_loss'])
-    #     return errG1, errG2, errD
-        
-
-    def save_model(self, args):
-        # save model
-        if (self.it+1) % args.save_interval == 0:
-            # To save storage space, I only checkpoint the weights of G.
-            # If you'd like to keep weights of G, D, optim_G, optim_D,
-            # please use save() instead of saveG().
-            self.saveG(os.path.join(
-                'result', args.experiment, args.name, self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
-            ))
-            # self.save(os.path.join(
-            #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
-            # ))
-
-                
-                
     
     
     
-    def eval_model(self, valid_dataloader, it_per_epoch, args):
-        fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
-        fixed_att_a = torch.unsqueeze(fixed_att_a,1) if len(list(fixed_att_a.size())) == 1 else fixed_att_a
-        fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
-        fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
-        fixed_att_a = fixed_att_a.type(torch.float)
-        sample_att_b_list = [fixed_att_a]
-        for i in range(args.n_attrs):
-            tmp = fixed_att_a.clone()
-            tmp[:, i] = 1 - tmp[:, i]
-            tmp = check_attribute_conflict(tmp, args.attrs[i], args.attrs)
-            sample_att_b_list.append(tmp)
-
-        # eval model
-        if (self.it+1) % args.sample_interval == 0:
-            self.eval()
-            with torch.no_grad():
-                samples = [fixed_img_a]
-                for i, att_b in enumerate(sample_att_b_list):
-                    att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
-                    if i > 0: # i == 0 is for reconstruction
-                        att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int # -1, 1 for interested att; -1/2, 1/2 for others
-                    samples.append(self.G(fixed_img_a, att_b_))
-                    # print(i)
-                    # print(att_b_)
-                samples.append(self.G(fixed_img_a, torch.zeros_like(att_b_)))
-                samples = torch.cat(samples, dim=3)
-                vutils.save_image(samples, os.path.join(
-                        'result', args.experiment, args.name, self.hyperparameter, 'sample_training',
-                        'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
-                    ), nrow=1, normalize=False, range=(0., 1.))
-                wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})
-    
-    
-    
-    
-
     
     def trainG_P1(self, img_a, att_a, att_a_, att_b, att_b_):
         for p in self.D.parameters():
             p.requires_grad = False
 
         zs_a = self.G(img_a, mode='enc')
-        ga_loss = self._att_criterion(zs_a[-1], att_a_)
+        ga_loss = self._attr_criterion(zs_a[-1], att_a_)
         img_recon = self.G(zs_a[-1], att_a_, mode='dec')
         d_recon, dc_recon = self.D(img_recon), self.P(img_recon)
 
@@ -227,7 +156,7 @@ class Model(A):
             p.requires_grad = False
 
         zs_a = self.G(img_a, mode='enc')
-        # att_loss = self._att_criterion(zs_a, att_a_) + self._att_criterion(zs_a)
+        # att_loss = self._attr_criterion(zs_a, att_a_) + self._attr_criterion(zs_a)
 
         img_fake = self.G(zs_a[-1].detach(), att_b_, mode='dec_erase')
         img_recon = self.G(zs_a[-1].detach(), att_a_, mode='dec_erase')
@@ -330,71 +259,3 @@ class Model(A):
             })
         return errD
     
-    def train(self):
-        self.G.train()
-        self.D.train()
-    
-    def eval(self):
-        self.G.eval()
-        self.D.eval()
-    
-    def save(self, path):
-        states = {
-            'G': self.G.state_dict(),
-            'D': self.D.state_dict(),
-            'optim_G': self.optim_G.state_dict(),
-            'optim_D': self.optim_D.state_dict()
-        }
-        torch.save(states, path)
-    
-    def load(self, path):
-        states = torch.load(path, map_location=lambda storage, loc: storage)
-        if 'G' in states:
-            self.G.load_state_dict(states['G'])
-        if 'D' in states:
-            self.D.load_state_dict(states['D'])
-        if 'optim_G' in states:
-            self.optim_G.load_state_dict(states['optim_G'])
-        if 'optim_D' in states:
-            self.optim_D.load_state_dict(states['optim_D'])
-    
-    def saveG(self, path):
-        states = {
-            'G': self.G.state_dict()
-        }
-        torch.save(states, path)
-
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--img_size', dest='img_size', type=int, default=128)
-    parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=1)
-    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=0)
-    parser.add_argument('--enc_dim', dest='enc_dim', type=int, default=64)
-    parser.add_argument('--dec_dim', dest='dec_dim', type=int, default=64)
-    parser.add_argument('--dis_dim', dest='dis_dim', type=int, default=64)
-    parser.add_argument('--dis_fc_dim', dest='dis_fc_dim', type=int, default=1024)
-    parser.add_argument('--enc_layers', dest='enc_layers', type=int, default=5)
-    parser.add_argument('--dec_layers', dest='dec_layers', type=int, default=5)
-    parser.add_argument('--dis_layers', dest='dis_layers', type=int, default=5)
-    parser.add_argument('--enc_norm', dest='enc_norm', type=str, default='batchnorm')
-    parser.add_argument('--dec_norm', dest='dec_norm', type=str, default='batchnorm')
-    parser.add_argument('--dis_norm', dest='dis_norm', type=str, default='instancenorm')
-    parser.add_argument('--dis_fc_norm', dest='dis_fc_norm', type=str, default='none')
-    parser.add_argument('--enc_acti', dest='enc_acti', type=str, default='lrelu')
-    parser.add_argument('--dec_acti', dest='dec_acti', type=str, default='relu')
-    parser.add_argument('--dis_acti', dest='dis_acti', type=str, default='lrelu')
-    parser.add_argument('--dis_fc_acti', dest='dis_fc_acti', type=str, default='relu')
-    parser.add_argument('--lambda_1', dest='lambda_1', type=float, default=100.0)
-    parser.add_argument('--lambda_2', dest='lambda_2', type=float, default=10.0)
-    parser.add_argument('--lambda_3', dest='lambda_3', type=float, default=1.0)
-    parser.add_argument('--lambda_gp', dest='lambda_gp', type=float, default=10.0)
-    parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
-    parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')
-    parser.add_argument('--beta1', dest='beta1', type=float, default=0.5)
-    parser.add_argument('--beta2', dest='beta2', type=float, default=0.999)
-    parser.add_argument('--gpu', action='store_true')
-    args = parser.parse_args()
-    args.n_attrs = 13
-    args.betas = (args.beta1, args.beta2)
-    attgan = AttGAN(args)

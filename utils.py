@@ -24,3 +24,11 @@ def load_pkl(load_path):
     with open(load_path, "rb") as f:
         pkl_data = pickle.load(f)
     return pkl_data
+
+def nextbatch(it, loader):
+    try:
+        x, target = next(it)
+    except StopIteration:
+        it = iter(loader)
+        x, target = next(it)
+    return x, target, it

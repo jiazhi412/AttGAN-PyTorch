@@ -26,11 +26,6 @@ class IMDBDataset(torch.utils.data.Dataset):
             self.key_list = self.key_list[:len(self.key_list) // 10]
         elif dev_or_test == 'test':
             self.key_list = self.key_list[len(self.key_list) // 10:]
-        
-        # print(len(self.key_list))
-        # print('dasjldjlkas')
-        # print(target_dict)
-        # print(target_dict['nm3924265_rm538246144_1989-2-20_2014.jpg'.encode('ascii')])
 
     def __getitem__(self, index):
         key = self.key_list[index]

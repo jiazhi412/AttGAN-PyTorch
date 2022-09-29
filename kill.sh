@@ -1,4 +1,4 @@
-for i in {268474..268508}
+for i in {270660..270677}
 do
 scancel $i
 done

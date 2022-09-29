@@ -9,7 +9,7 @@ from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
 from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
-import backbones.basenet as basenet
+import models.module.basenet as basenet
 from torchsummary import summary
 import wandb
 

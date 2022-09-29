@@ -9,10 +9,11 @@ from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
 from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
-from backbones.Encoder import *
-from backbones.Regressor import *
+from models.module.Encoder import *
+from models.module.Regressor import *
 from torchsummary import summary
 import wandb
+import os
 
 
 # This architecture is for images of 128x128
@@ -197,7 +198,11 @@ class AttGAN():
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
 
         self.P = Adv()
-        self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_sig.pth')
+        # unbiased
+        # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_sig.pth')
+        # biased var=0
+        # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_0.pth')
+        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(args.biased_var), '32_0.001_best.pth'))
         self.P.eval()
         if self.gpu: self.P.cuda()
         summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
