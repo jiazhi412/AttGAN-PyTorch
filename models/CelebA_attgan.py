@@ -1,22 +1,24 @@
+import os
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
 import torch.nn.functional as F
 import torch.optim as optim
+import torchvision.utils as vutils
 from torchsummary import summary
-import wandb
 from helpers import Progressbar
-import itertools
+import wandb
 import utils
 import copy
 
+from models.module import *
 from models.module.MINE.model import M
 from models.module.MINE.utils import mi_criterion
+from dataloader.CelebA_ import check_attribute_conflict
+# from models.CelebA_label_mse_MI import Model as C
 
-from models.module import *
-from models.CelebA_label_mse_MI import Model as C
 
-class Model(C):
+class Model:
     def __init__(self, args):
         self.mode = args.mode
         self.gpu = args.gpu
@@ -25,13 +27,12 @@ class Model(C):
         self.gc = args.gc
         self.dc = args.dc
         self.gp = args.gp
-        self.ga = args.ga
-        self.mi = args.mi
-        self.num_iter_MI = args.num_iter_MI
+        # self.ga = args.ga
+        # self.mi = args.mi
+        # self.num_iter_MI = args.num_iter_MI
         self.dim_per_attr = args.dim_per_attr
         self.f_size = args.img_size // 2**args.enc_layers  # f_size = 4 for 128x128
         
-        self.scheduler = itertools.cycle([0] * args.num_ganp1 + [1] * args.num_ganp2 + [2] * args.num_dis)
         self.hyperparameter = args.hyperparameter
 
         self.epoch = 0
@@ -59,22 +60,14 @@ class Model(C):
         if self.multi_gpu:
             self.G = nn.DataParallel(self.G)
             self.D = nn.DataParallel(self.D)
-            # self.mine = nn.DataParallel(self.mine)
         
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
-        # self.optim_mine = optim.Adam(self.mine.parameters(), lr=args.lr, betas=args.betas)
-    
-    def set_lr(self, lr):
-        for g in self.optim_G.param_groups:
-            g['lr'] = lr
-        for g in self.optim_D.param_groups:
-            g['lr'] = lr
     
     def train_epoch(self, train_dataloader, valid_dataloader, it_per_epoch, args):
         progressbar = Progressbar()
         # train with base lr in the first 100 epochs and half the lr in the last 100 epochs
-        lr = args.lr_base / (10 ** (self.epoch // 100))
+        lr = args.lr_base / (10 ** (self.epoch // 20))
         self.set_lr(lr)
 
         # start iteration
@@ -83,8 +76,7 @@ class Model(C):
             # prepare data
             img_a, att_a, att_a_, att_b, att_b_ = self.prepare_data(img_a, att_a, args)
 
-            # # train model
-            # phase = next(self.scheduler)
+            # train model
             self.train()
 
             if (self.it+1) % (args.n_d+1) != 0:
@@ -94,11 +86,22 @@ class Model(C):
             if errD and errG:
                 progressbar.say(epoch=self.epoch, iter=self.it+1, d_loss=errD['d_loss'], g_loss=errG['g_loss'])
 
-            self.save_model(args)
-            self.eval_model(valid_dataloader, it_per_epoch, args)
+            if (self.it+1) % args.save_interval == 0:
+                self.save_model(args)
+                self.eval_model(valid_dataloader, it_per_epoch, args)
             self.it += 1
         self.epoch += 1
     
+    def prepare_data(self, img_a, att_a, args):
+        att_a = torch.unsqueeze(att_a,1) if len(list(att_a.size())) == 1 else att_a
+        img_a = img_a.cuda() if args.gpu else img_a
+        att_a = att_a.cuda() if args.gpu else att_a
+        att_b = 1 - att_a
+        att_a = att_a.type(torch.float)
+        att_b = att_b.type(torch.float)
+        att_a_ = (att_a * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+        att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+        return img_a, att_a, att_a_, att_b, att_b_
     
     def trainG(self, img_a, att_a, att_a_, att_b, att_b_):
         for p in self.D.parameters():
@@ -196,6 +199,12 @@ class Model(C):
             'd/df_gp_loss': df_gp.item(),
             })
         return errD
+
+    def set_lr(self, lr):
+        for g in self.optim_G.param_groups:
+            g['lr'] = lr
+        for g in self.optim_D.param_groups:
+            g['lr'] = lr
     
     def train(self):
         self.G.train()
@@ -213,6 +222,12 @@ class Model(C):
             'optim_D': self.optim_D.state_dict(),
         }
         torch.save(states, path)
+
+    def saveG(self, path):
+        states = {
+            'G': self.G.state_dict()
+        }
+        torch.save(states, path)
     
     def load(self, path):
         states = torch.load(path, map_location=lambda storage, loc: storage)
@@ -224,3 +239,46 @@ class Model(C):
             self.optim_G.load_state_dict(states['optim_G'])
         if 'optim_D' in states:
             self.optim_D.load_state_dict(states['optim_D'])
+    
+    def save_model(self, args):
+        # save model
+        # To save storage space, I only checkpoint the weights of G.
+        # If you'd like to keep weights of G, D, optim_G, optim_D,
+        # please use save() instead of saveG().
+        self.saveG(os.path.join(
+            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.eval_mode, self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
+        ))
+        # self.save(os.path.join(
+        #     'result', args.experiment, args.name, args.eval_mode, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+        # ))
+        
+    def eval_model(self, valid_dataloader, it_per_epoch, args):
+        fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
+        fixed_att_a = torch.unsqueeze(fixed_att_a,1) if len(list(fixed_att_a.size())) == 1 else fixed_att_a
+        fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
+        fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
+        fixed_att_a = fixed_att_a.type(torch.float)
+        sample_att_b_list = [fixed_att_a]
+        for i in range(args.n_attrs):
+            tmp = fixed_att_a.clone()
+            tmp[:, i] = 1 - tmp[:, i]
+            tmp = check_attribute_conflict(tmp, args.attrs[i], args.attrs)
+            sample_att_b_list.append(tmp)
+
+        # eval model
+        self.eval()
+        with torch.no_grad():
+            samples = [fixed_img_a]
+            for i, att_b in enumerate(sample_att_b_list):
+                att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
+                if i > 0: # i == 0 is for reconstruction
+                    att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int # -1, 1 for interested att; -1/2, 1/2 for others
+                samples.append(self.G(fixed_img_a, att_b_))
+            samples.append((samples[-1] + samples[-2])/2)
+            samples.append(self.G(fixed_img_a, torch.zeros_like(att_b_)))
+            samples = torch.cat(samples, dim=3)
+            vutils.save_image(samples, os.path.join(
+                    'result', args.experiment, args.name, args.eval_mode, self.hyperparameter, 'sample_training',
+                    'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
+                ), nrow=1, normalize=False, range=(0., 1.))
+            # wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

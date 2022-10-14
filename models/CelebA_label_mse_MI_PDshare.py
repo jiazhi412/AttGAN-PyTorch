@@ -124,7 +124,7 @@ class Model(C):
         batch_iter = iter(mine_loader)
 
         # pretrain MINE at the beginning of every epoch
-        self.pretrainMI(mine_loader, args)
+        # self.pretrainMI(mine_loader, args)
         
         # start iteration
         errG1, errG2, errD = None, None, None

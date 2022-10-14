@@ -24,7 +24,6 @@ class Discriminator_Predictor(nn.Module):
             n_in = n_out
         self.conv = nn.Sequential(*layers)
         fc_in_dim = min(dim * 2**(n_layers-1), MAX_DIM)
-        # print(fc_in_dim)
         self.fc_adv = nn.Sequential(
             LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
             LinearBlock(fc_dim, 1, 'none', 'none')
@@ -38,5 +37,3 @@ class Discriminator_Predictor(nn.Module):
         h = self.conv(x)
         h = h.view(h.size(0), -1)
         return self.fc_adv(h), self.fc_cls(h)
-
-

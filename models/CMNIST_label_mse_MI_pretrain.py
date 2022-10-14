@@ -66,7 +66,7 @@ class Model(C):
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
 
         self.P = Adv()
-        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(args.biased_var), '32_0.001_best.pth'))
+        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(float(args.biased_var)), '32_0.001_best.pth'))
         self.P.eval()
         if self.gpu: self.P.cuda()
         summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
@@ -443,7 +443,7 @@ class Model(C):
         # If you'd like to keep weights of G, D, optim_G, optim_D,
         # please use save() instead of saveG().
         self.saveG(os.path.join(
-            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
+            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
         ))
         # self.save(os.path.join(
         #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
@@ -463,7 +463,7 @@ class Model(C):
                 samples.append(self.G(fixed_img_a, att_b))
             samples = torch.cat(samples, dim=3)
             vutils.save_image(samples, os.path.join(
-                    'result', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'sample_training',
+                    'result', args.experiment, args.name, str(float(args.biased_var)), self.hyperparameter, 'sample_training',
                     'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
                 ), nrow=1, normalize=False, range=(0., 1.))
             # wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

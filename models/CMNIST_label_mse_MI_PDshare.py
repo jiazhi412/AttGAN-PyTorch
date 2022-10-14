@@ -78,17 +78,6 @@ class Model(C):
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
         self.optim_mine = optim.Adam(self.mine.parameters(), lr=args.lr, betas=args.betas)
-
-    def renewMINE(self, args):
-        some_module = self.mine.layer
-        # del self.mine.layer
-        del self.optim_mine
-        del some_module
-
-        self.mine = M(input_dim=args.enc_dim * 2 ** (args.enc_layers-1) * 7 * 7) # 64 * (2**(5-1)) * 7 * 7 = 50176
-        self.mine.train()
-        if self.gpu: self.mine.cuda()
-        self.optim_mine = optim.Adam(self.mine.parameters(), lr=args.lr, betas=args.betas)
     
     def initMINE(self):
         def init_weights(m):
@@ -411,7 +400,7 @@ class Model(C):
         # If you'd like to keep weights of G, D, optim_G, optim_D,
         # please use save() instead of saveG().
         self.saveG(os.path.join(
-            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
+            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
         ))
         # self.save(os.path.join(
         #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
@@ -431,7 +420,7 @@ class Model(C):
                 samples.append(self.G(fixed_img_a, att_b))
             samples = torch.cat(samples, dim=3)
             vutils.save_image(samples, os.path.join(
-                    'result', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'sample_training',
+                    'result', args.experiment, args.name, str(float(args.biased_var)), self.hyperparameter, 'sample_training',
                     'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
                 ), nrow=1, normalize=False, range=(0., 1.))
             # wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

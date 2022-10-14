@@ -26,8 +26,8 @@ def parse(args=None):
     parser.add_argument('--syn_data_path', dest='syn_data_path', type=str, default='/nas/vista-ssd01/users/jiazli/synthetic_datasets/CelebA/processed_data/blond_hair')
     
     parser.add_argument('--img_size', dest='img_size', type=int, default=224)
-    parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=0) #
-    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=0) #
+    parser.add_argument('--shortcut_layers', dest='shortcut_layers', type=int, default=1) #
+    parser.add_argument('--inject_layers', dest='inject_layers', type=int, default=1) #
     parser.add_argument('--enc_dim', dest='enc_dim', type=int, default=64)
     parser.add_argument('--dec_dim', dest='dec_dim', type=int, default=64)
     parser.add_argument('--dis_dim', dest='dis_dim', type=int, default=64)
@@ -49,13 +49,16 @@ def parse(args=None):
     parser.add_argument('--gp', dest='gp', type=float, default=10.0) # default in WGAN-GP
     parser.add_argument('--ga', dest='ga', type=float, default=5.0) # TODO
     parser.add_argument('--mi', dest='mi', type=float, default=5.0) # TODO
-    parser.add_argument('--num_iter_MI', type=int, default=20) # TODO
+    parser.add_argument('--num_iter_MI', type=int, default=40) # TODO
+    # parser.add_argument('--num_iter_MI', type=int, default=1) # TODO
     # parser.add_argument('--gf', dest='gf', type=float, default=1.0) #
     parser.add_argument('--dim_per_attr', type=int, default=200) # TODO matters serious
+    # parser.add_argument('--dim_per_attr', type=int, default=1) # TODO matters serious
     parser.add_argument('--num_g1', type=int, default=1) # TODO
     parser.add_argument('--num_g2', type=int, default=1) # TODO 
     parser.add_argument('--num_dis', type=int, default=1) # TODO matter style
     
+    parser.add_argument("--eval_mode", type=str, choices=['biased', 'biased_ex', 'unbiased'], default='biased')
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan']) #
     parser.add_argument('--epochs', dest='epochs', type=int, default=20, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
@@ -64,7 +67,7 @@ def parse(args=None):
     parser.add_argument('--lr', dest='lr', type=float, default=0.0003, help='learning rate')
     parser.add_argument('--beta1', dest='beta1', type=float, default=0) # default in WGAN-GP
     parser.add_argument('--beta2', dest='beta2', type=float, default=0.9) # default in WGAN-GP
-    # parser.add_argument('--n_d', dest='n_d', type=int, default=5, help='# of d updates per g update')
+    parser.add_argument('--n_d', dest='n_d', type=int, default=5, help='# of d updates per g update')
     
     # parser.add_argument('--b_distribution', dest='b_distribution', default='none', choices=['none', 'uniform', 'truncated_normal'])
     parser.add_argument('--thres_int', dest='thres_int', type=float, default=0.5)
@@ -93,7 +96,9 @@ args.lr_base = args.lr
 args.n_attrs = len(args.attrs)
 args.betas = (args.beta1, args.beta2)
 # args.hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.gp}-ga{args.ga}-mi{args.mi}'
-args.hyperparameter = f'gr{args.gr}-gc{args.gc}-dc{args.dc}-ga{args.ga}-mi{args.mi}-dpa{args.dim_per_attr}-{args.num_g1}-{args.num_g2}-{args.num_dis}'
+# args.hyperparameter = f'gr{args.gr}-gc{args.gc}-dc{args.dc}-ga{args.ga}-mi{args.mi}-dpa{args.dim_per_attr}-{args.num_g1}-{args.num_g2}-{args.num_dis}'
+args.hyperparameter = f'gr{args.gr}_gc{args.gc}_dc{args.dc}_mi{args.mi}_dpa{args.dim_per_attr}_nd{args.n_d}'
+
 
 
 wandb.init(project="AttGAN",
@@ -104,13 +109,13 @@ wandb.init(project="AttGAN",
             name=args.hyperparameter
 )
 
-os.makedirs(join('result', args.experiment, args.name, args.hyperparameter), exist_ok=True)
-# os.makedirs(join('result', args.experiment, args.name, args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment, args.name, args.hyperparameter, 'sample_training'), exist_ok=True)
-with open(join('result', args.experiment, args.name, args.hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, args.eval_mode, args.hyperparameter), exist_ok=True)
+# os.makedirs(join('result', args.experiment, args.name, args.eval_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.eval_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, args.eval_mode, args.hyperparameter, 'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, args.eval_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
-with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.hyperparameter, 'setting.txt'), 'w') as f:
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.eval_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 # choose model
@@ -139,6 +144,12 @@ elif args.experiment == 'label_mse_MI_Pscratch':
 elif args.experiment == 'attGAN_MI':
     from models.CelebA_attgan_MI import Model
     m = Model(args)
+elif args.experiment == 'attGAN_MI_Pwarmup':
+    from models.CelebA_attgan_MI_Pwarmup import Model
+    m = Model(args)
+elif args.experiment == 'attGAN_MI_Pwarmup_neutral':
+    from models.CelebA_attgan_MI_Pwarmup_neutral import Model
+    m = Model(args)
 elif args.experiment == 'attGAN':
     from models.CelebA_attgan import Model
     m = Model(args)
@@ -148,13 +159,19 @@ elif args.experiment == 'attGAN':
 
 # choose dataset
 if args.data == 'CelebA':
-    from dataloader.CelebA_ import CelebA
-    train_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'all', args.attrs)
-    valid_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'valid', args.attrs)
-elif args.data == 'CelebA_unbiased':
-    from dataloader.CelebA_unbiased import CelebA_unbiased
-    train_dataset = CelebA_unbiased(args.data_path, args.attr_path, args.syn_data_path, args.img_size, 'all', args.attrs, args.attrs_d)
-    valid_dataset = CelebA_unbiased(args.data_path, args.attr_path, args.syn_data_path, args.img_size, 'valid', args.attrs, args.attrs_d)
+    if args.eval_mode == 'biased':
+    # if args.eval_mode == 'CelebA_biased_ex':
+        from dataloader.CelebA_ import CelebA
+        train_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'all', args.attrs)
+        valid_dataset = CelebA(args.data_path, args.attr_path, args.img_size, 'valid', args.attrs)
+    if args.eval_mode == 'biased_ex':
+        from dataloader.CelebA_ import CelebA
+        # combine attrs_d to delete pp and nn
+        pass
+    elif args.eval_mode == 'unbiased':
+        from dataloader.CelebA_unbiased import CelebA_unbiased
+        train_dataset = CelebA_unbiased(args.data_path, args.attr_path, args.syn_data_path, args.img_size, 'all', args.attrs, args.attrs_d)
+        valid_dataset = CelebA_unbiased(args.data_path, args.attr_path, args.syn_data_path, args.img_size, 'valid', args.attrs, args.attrs_d)
 
     
 

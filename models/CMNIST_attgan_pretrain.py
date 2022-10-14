@@ -179,7 +179,7 @@ class AttGAN():
 
         # print(args.n_attrs)
         
-        self.G = Generator(
+        self.G = Generator_sigmoid(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
             args.dec_dim, args.dec_layers, args.dec_norm, args.dec_acti,
             args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size,
@@ -203,7 +203,7 @@ class AttGAN():
         # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_sig.pth')
         # biased var=0
         # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_0.pth')
-        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(args.biased_var), '32_0.001_best.pth'))
+        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(float(args.biased_var)), '32_0.001_best.pth'))
         self.P.eval()
         if self.gpu: self.P.cuda()
         summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')

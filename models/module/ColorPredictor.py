@@ -9,7 +9,7 @@ import wandb
 import os
 
 
-class Adv(nn.Module):
+class ColorPredictor(nn.Module):
     
     def __init__(self):
         super().__init__()
@@ -19,21 +19,11 @@ class Adv(nn.Module):
         self.regressor = Regressor(e_dim=self.hidden_size)
         self.sig = nn.Sigmoid()
     
-    def load_weights(self, file_path, optim_pred=None):
+    def load_weights(self, file_path):
         ckpt = torch.load(file_path)
         self.epoch = ckpt['pretrain_epoch']
         self.encoder.load_state_dict(ckpt["encoder"])
         self.regressor.load_state_dict(ckpt["regressor"])
-        if optim_pred is not None:
-            optim_pred_state_dict = ckpt["optim_pred"]
-            if optim_pred_state_dict is None:
-                print("WARNING: No optim_pred state dict found")
-            else:
-                optim_pred.load_state_dict(optim_pred_state_dict)
-    
-    # def _criterion_regr(self, output, target):
-    #     # return F.l1_loss(output, target)
-    #     return F.mse_loss(output, target)
     
     def forward(self, x):
         z = self.encoder(x)

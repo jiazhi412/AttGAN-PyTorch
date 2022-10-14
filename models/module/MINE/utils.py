@@ -11,9 +11,11 @@ import numpy as np
 def mi_criterion(a, z, mine_net):
     # print(a.size())
     # print(z.size())
-    # print('adsjlald')
+    # print('dajsldaj')
     index, joint = sample_batch_joint(z, a)
+    # print(joint.size())
     marginal = sample_batch_marginal(z, a, index)
+    # print(marginal.size())
 
     t = mine_net(joint)
     et = torch.exp(mine_net(marginal))

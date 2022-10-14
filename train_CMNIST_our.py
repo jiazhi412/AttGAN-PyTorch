@@ -58,7 +58,7 @@ def parse(args=None):
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')
     parser.add_argument('--beta1', dest='beta1', type=float, default=0.5) # default in WGAN-GP
     parser.add_argument('--beta2', dest='beta2', type=float, default=0.999) # default in WGAN-GP
-    # parser.add_argument('--n_d', dest='n_d', type=int, default=5, help='# of d updates per g update')
+    parser.add_argument('--n_d', dest='n_d', type=int, default=5, help='# of d updates per g update')
     
     # parser.add_argument('--b_distribution', dest='b_distribution', default='none', choices=['none', 'uniform', 'truncated_normal'])
     parser.add_argument('--thres_int', dest='thres_int', type=float, default=0.5)
@@ -87,7 +87,8 @@ args.lr_base = args.lr
 args.n_attrs = 3 # RGB
 args.betas = (args.beta1, args.beta2)
 # args.hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.gp}-ga{args.ga}-mi{args.mi}'
-args.hyperparameter = f'gr{args.gr}-gc{args.gc}-dc{args.dc}-ga{args.ga}-mi{args.mi}-dpa{args.dim_per_attr}-{args.num_g1}-{args.num_g2}-{args.num_dis}'
+# args.hyperparameter = f'gr{args.gr}-gc{args.gc}-dc{args.dc}-ga{args.ga}-mi{args.mi}-dpa{args.dim_per_attr}-{args.num_g1}-{args.num_g2}-{args.num_dis}'
+args.hyperparameter = f'gr{args.gr}_gc{args.gc}_dc{args.dc}_mi{args.mi}_dpa{args.dim_per_attr}_nd{args.n_d}'
 
 
 wandb.init(project="AttGAN",
@@ -98,13 +99,13 @@ wandb.init(project="AttGAN",
             name=args.hyperparameter
 )
 
-os.makedirs(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter), exist_ok=True)
-# os.makedirs(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'sample_training'), exist_ok=True)
-with open(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter), exist_ok=True)
+# os.makedirs(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
-with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 # choose model
@@ -127,9 +128,6 @@ elif args.experiment == 'label_mse':
 # elif args.experiment == 'label_mse_MI_Pscratch':
 #     from models.CelebA_label_mse_MI_Pscratch import Model
 #     m = Model(args)
-# elif args.experiment == 'attGAN_MI':
-#     from models.CelebA_attgan_MI import Model
-#     m = Model(args)
 # elif args.experiment == 'attGAN':
 #     from models.CelebA_attgan import Model
 #     m = Model(args)
@@ -141,6 +139,12 @@ elif args.experiment == 'label_mse_MI_Pwarmup':
     m = Model(args)
 elif args.experiment == 'label_mse_MI_pretrain':
     from models.CMNIST_label_mse_MI_pretrain import Model
+    m = Model(args)
+elif args.experiment == 'attGAN_MI_Pwarmup_neutral':
+    from models.CMNIST_attgan_MI_Pwarmup_neutral import Model
+    m = Model(args)
+elif args.experiment == 'attGAN_MI_pretrain_neutral':
+    from models.CMNIST_attgan_MI_pretrain_neutral import Model
     m = Model(args)
 
 
@@ -156,10 +160,10 @@ if args.data == 'CMNIST':
     train_set_grey, dev_set_grey = torch.utils.data.random_split(train_set_grey, [50000, 10000])
 
     train_dataset = ColoredDataset_generated(train_set_grey, var=args.biased_var)
-    valid_dataset = ColoredDataset_generated(dev_set_grey, var=args.biased_var)
-    test_set = ColoredDataset_generated(test_set_grey, var=args.biased_var)
+    valid_dataset = ColoredDataset_generated(dev_set_grey, var=-1)
+    test_set = ColoredDataset_generated(test_set_grey, var=-1)
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True)
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=args.n_samples, shuffle=True, num_workers=4, pin_memory=True)
 
@@ -177,5 +181,7 @@ print('Training images:', len(train_dataset), '/', 'Validating images:', len(val
 
 # start epoch
 it_per_epoch = len(train_dataset) // args.batch_size
+# print(it_per_epoch)
+# print('djlsajda')
 for epoch in range(args.epochs):
     m.train_epoch(train_dataloader, valid_dataloader, it_per_epoch, args)

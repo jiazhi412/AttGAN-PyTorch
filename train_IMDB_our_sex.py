@@ -64,7 +64,7 @@ def parse(args=None):
     parser.add_argument('--num_ganp2', type=int, default=1) # TODO 
     parser.add_argument('--num_dis', type=int, default=1) # TODO
 
-    parser.add_argument("--imdb_train_mode", type=str, default='all')
+    parser.add_argument("--IMDB_train_mode", type=str, choices=['eb1', 'eb2', 'eb1_ex', 'eb2_ex', 'all'], default='all')
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan']) #
     parser.add_argument('--epochs', dest='epochs', type=int, default=100, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
@@ -104,13 +104,13 @@ wandb.init(project="AttGAN",
             name=args.hyperparameter
 )
 
-os.makedirs(join('result', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter), exist_ok=True)
-# os.makedirs(join('result', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter, 'sample_training'), exist_ok=True)
-with open(join('result', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter), exist_ok=True)
+# os.makedirs(join('result', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter, 'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
-with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.imdb_train_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, args.IMDB_train_mode, args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 # choose model
@@ -166,7 +166,7 @@ if args.data == 'IMDB':
                                     transforms.ToTensor(),
                                     # normalize,
                                     ])
-    train_dataset = IMDBDataset(image_feature_path, target_dict, sex_dict, args.imdb_train_mode, eb1_key_list, eb2_key_list, unbiased_key_list, 'train', transform)
+    train_dataset = IMDBDataset(image_feature_path, target_dict, sex_dict, args.IMDB_train_mode, eb1_key_list, eb2_key_list, unbiased_key_list, 'train', transform)
     valid_dataset = IMDBDataset(image_feature_path, target_dict, sex_dict, 'all', eb1_key_list, eb2_key_list, unbiased_key_list, 'dev', transform)
 
 

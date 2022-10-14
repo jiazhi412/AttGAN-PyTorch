@@ -93,13 +93,13 @@ wandb.init(project="AttGAN",
             name=args.hyperparameter
 )
 
-os.makedirs(join('result', args.experiment, args.name, str(args.biased_var)), exist_ok=True)
-# os.makedirs(join('result', args.experiment_name, str(args.biased_var), args.hyperparameter,  'checkpoint'), exist_ok=True)
-os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter,  'sample_training'), exist_ok=True)
-with open(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, str(float(args.biased_var))), exist_ok=True)
+# os.makedirs(join('result', args.experiment_name, str(float(args.biased_var)), args.hyperparameter,  'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter,  'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
-with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 if args.data == 'CMNIST':
@@ -176,13 +176,13 @@ for epoch in range(args.epochs):
             # If you'd like to keep weights of G, D, optim_G, optim_D,
             # please use save() instead of saveG().
             # attgan.saveG(os.path.join(
-            #     'result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            #     'result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
             attgan.saveG(os.path.join(
-                '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+                '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             ))
             # attgan.save(os.path.join(
-            #     'result', args.experiment_name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            #     'result', args.experiment_name, str(float(args.biased_var)), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
         if (it+1) % args.sample_interval == 0:
             attgan.eval()
@@ -193,7 +193,7 @@ for epoch in range(args.epochs):
                 samples = torch.cat(samples, dim=3)
                 # writer.add_image('sample', vutils.make_grid(samples, nrow=1, normalize=True, range=(-1., 1.)), it+1)
                 vutils.save_image(samples, os.path.join(
-                        'result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'sample_training',
+                        'result', args.experiment, args.name, str(float(args.biased_var)), args.hyperparameter, 'sample_training',
                         'Epoch_({:d})_({:d}of{:d}).jpg'.format(epoch, it%it_per_epoch+1, it_per_epoch)
                     ), nrow=1, normalize=False, range=(0., 1.))
                 wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})
