@@ -7,11 +7,11 @@ import wandb
 
 MAX_DIM = 64 * 16  # 1024
 
-class Generator_no_inject(nn.Module):
+class Generator_no_inject_sigmoid(nn.Module):
     def __init__(self, enc_dim=64, enc_layers=5, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
                  dec_dim=64, dec_layers=5, dec_norm_fn='batchnorm', dec_acti_fn='relu',
                  n_attrs=1, shortcut_layers=1, inject_layers=1, img_size=224, dim_per_attr = 5):
-        super(Generator_no_inject, self).__init__()
+        super(Generator_no_inject_sigmoid, self).__init__()
         self.shortcut_layers = min(shortcut_layers, dec_layers - 1)
         self.inject_layers = min(inject_layers, dec_layers - 1)
         self.f_size = img_size // 2**enc_layers  # f_size = 4 for 128x128
@@ -54,8 +54,8 @@ class Generator_no_inject(nn.Module):
                 # n_in = n_in + dim_attrs if self.inject_layers > i else n_in # inject attr
             else: # last layer
                 layers += [ConvTranspose2dBlock(
-                    # n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='sigmoid'
-                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='tanh'
+                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='sigmoid'
+                    # n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='tanh'
                 )]
         self.dec_layers = nn.ModuleList(layers)
     

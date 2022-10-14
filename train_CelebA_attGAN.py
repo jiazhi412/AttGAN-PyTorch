@@ -100,9 +100,12 @@ args.n_attrs = len(args.attrs)
 args.betas = (args.beta1, args.beta2)
 
 os.makedirs(join('result', args.experiment_name), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, 'checkpoint'), exist_ok=True)
+# os.makedirs(join('result', args.experiment_name, 'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment_name, 'checkpoint'), exist_ok=True)
 os.makedirs(join('result', args.experiment_name, 'sample_training'), exist_ok=True)
 with open(join('result', args.experiment_name, 'setting.txt'), 'w') as f:
+    f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment_name, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 if args.data == 'CelebA':

@@ -19,7 +19,6 @@ import torchvision.utils as vutils
 from models.attgan import AttGAN
 from dataloader.CelebA_origin import check_attribute_conflict
 from helpers import Progressbar, add_scalar_dict
-from tensorboardX import SummaryWriter
 import wandb
 
 import utils

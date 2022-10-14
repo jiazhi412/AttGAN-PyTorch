@@ -19,7 +19,6 @@ import wandb
 from helpers import Progressbar
 from torchvision import datasets, transforms
 
-from models.CMNIST import AttGAN
 from dataloader.CMNIST import ColoredDataset_generated
 
 
@@ -55,7 +54,7 @@ def parse(args=None):
     parser.add_argument('--dim_per_attr', type=int, default=10) #
     
     parser.add_argument('--mode', dest='mode', default='wgan', choices=['wgan', 'lsgan', 'dcgan'])
-    parser.add_argument('--epochs', dest='epochs', type=int, default=5, help='# of epochs')
+    parser.add_argument('--epochs', dest='epochs', type=int, default=14, help='# of epochs')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=32)
     parser.add_argument('--num_workers', dest='num_workers', type=int, default=4)
     parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='learning rate')
@@ -72,31 +71,35 @@ def parse(args=None):
     parser.add_argument('--sample_interval', dest='sample_interval', type=int, default=1000)
     parser.add_argument('--no_gpu', dest='gpu', action='store_false')
     parser.add_argument('--multi_gpu', dest='multi_gpu', action='store_true')
-    parser.add_argument('--experiment_name', dest='experiment_name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
+    # parser.add_argument('--experiment_name', dest='experiment_name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
+    parser.add_argument("--experiment", metavar="",)
+    parser.add_argument('--name', default=datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y"))
     
     return parser.parse_args(args)
 
 args = parse()
 print(args)
 
-hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.lambda_gp}-dpa{args.dim_per_attr}'
+args.lr_base = args.lr
+args.n_attrs = 3 # RGB
+args.betas = (args.beta1, args.beta2)
+args.hyperparameter = f'shortcut{args.shortcut_layers}-inject{args.inject_layers}-gr{args.gr}-gc{args.gc}-dc{args.dc}-gp{args.lambda_gp}-dpa{args.dim_per_attr}'
 
 wandb.init(project="AttGAN",
             entity="jiazhi", 
             config=args, 
-            group=args.experiment_name, 
-            job_type=str(args.biased_var), 
-            name=hyperparameter
+            group=args.experiment, 
+            job_type=args.name, 
+            name=args.hyperparameter
 )
 
-args.lr_base = args.lr
-args.n_attrs = 3 # RGB
-args.betas = (args.beta1, args.beta2)
-
-os.makedirs(join('result', args.experiment_name, str(args.biased_var)), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, str(args.biased_var), hyperparameter,  'checkpoint'), exist_ok=True)
-os.makedirs(join('result', args.experiment_name, str(args.biased_var), hyperparameter,  'sample_training'), exist_ok=True)
-with open(join('result', args.experiment_name, str(args.biased_var), hyperparameter, 'setting.txt'), 'w') as f:
+os.makedirs(join('result', args.experiment, args.name, str(args.biased_var)), exist_ok=True)
+# os.makedirs(join('result', args.experiment_name, str(args.biased_var), args.hyperparameter,  'checkpoint'), exist_ok=True)
+os.makedirs(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint'), exist_ok=True)
+os.makedirs(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter,  'sample_training'), exist_ok=True)
+with open(join('result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
+    f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
+with open(join('/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'setting.txt'), 'w') as f:
     f.write(json.dumps(vars(args), indent=4, separators=(',', ':')))
 
 if args.data == 'CMNIST':
@@ -120,10 +123,18 @@ if args.data == 'CMNIST':
 
 print('Training images:', len(train_dataset), '/', 'Validating images:', len(valid_dataset))
 
-attgan = AttGAN(args)
+if args.experiment == 'attGAN_pretrain':
+    from models.CMNIST_attgan_pretrain import AttGAN
+    attgan = AttGAN(args)
+if args.experiment == 'attGAN':
+    from models.CMNIST_attgan import AttGAN
+    attgan = AttGAN(args)
+if args.experiment == 'attGAN_PDsplit':
+    from models.CMNIST_attgan_PDsplit import AttGAN
+    attgan = AttGAN(args)
 progressbar = Progressbar()
 
-fixed_img_a, y, fixed_att_a = next(iter(valid_dataloader))
+fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
 fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
 fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
 sample_att_b_list = [fixed_att_a, torch.ones_like(fixed_att_a), torch.zeros_like(fixed_att_a)]
@@ -139,7 +150,7 @@ for epoch in range(args.epochs):
     lr = args.lr_base / (10 ** (epoch // 100))
     attgan.set_lr(lr)
     #writer.add_scalar('LR/learning_rate', lr, it+1)
-    for img_a, y, att_a in progressbar(train_dataloader):
+    for img_a, att_a in progressbar(train_dataloader):
         attgan.train()
         
         # att_a = torch.unsqueeze(att_a,1) if len(list(att_a.size())) == 1 else att_a
@@ -164,11 +175,14 @@ for epoch in range(args.epochs):
             # To save storage space, I only checkpoint the weights of G.
             # If you'd like to keep weights of G, D, optim_G, optim_D,
             # please use save() instead of saveG().
+            # attgan.saveG(os.path.join(
+            #     'result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            # ))
             attgan.saveG(os.path.join(
-                'result', args.experiment_name, str(args.biased_var), hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+                '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             ))
             # attgan.save(os.path.join(
-            #     'result', args.experiment_name, str(args.biased_var), hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
+            #     'result', args.experiment_name, str(args.biased_var), args.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
             # ))
         if (it+1) % args.sample_interval == 0:
             attgan.eval()
@@ -179,7 +193,7 @@ for epoch in range(args.epochs):
                 samples = torch.cat(samples, dim=3)
                 # writer.add_image('sample', vutils.make_grid(samples, nrow=1, normalize=True, range=(-1., 1.)), it+1)
                 vutils.save_image(samples, os.path.join(
-                        'result', args.experiment_name, str(args.biased_var), hyperparameter, 'sample_training',
+                        'result', args.experiment, args.name, str(args.biased_var), args.hyperparameter, 'sample_training',
                         'Epoch_({:d})_({:d}of{:d}).jpg'.format(epoch, it%it_per_epoch+1, it_per_epoch)
                     ), nrow=1, normalize=False, range=(0., 1.))
                 wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

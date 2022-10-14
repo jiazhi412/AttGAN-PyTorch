@@ -115,15 +115,15 @@ class Discriminators(nn.Module):
             LinearBlock(fc_dim, 1, 'none', 'none')
         )
 
-
         # self.fc_cls = nn.Sequential(
-        #     LinearBlock(1024 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
-        #     LinearBlock(fc_dim, 2, 'none', 'none')
+        #     LinearBlock(256 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+        #     LinearBlock(fc_dim, n_attrs, 'none', 'none')
         # )
     
     def forward(self, x):
         h = self.conv(x)
         h = h.view(h.size(0), -1)
+        # return self.fc_adv(h), self.fc_cls(h)
         return self.fc_adv(h)
 
 
@@ -149,9 +149,9 @@ class Adv(nn.Module):
             else:
                 optim_pred.load_state_dict(optim_pred_state_dict)
     
-    def _criterion_regr(self, output, target):
-        # return F.l1_loss(output, target)
-        return F.mse_loss(output, target)
+    # def _criterion_regr(self, output, target):
+    #     # return F.l1_loss(output, target)
+    #     return F.mse_loss(output, target)
     
     def forward(self, x):
         z = self.encoder(x)
@@ -198,27 +198,30 @@ class AttGAN():
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
 
         self.P = Adv()
-        # unbiased
-        # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_sig.pth')
-        # biased var=0
-        # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_0.pth')
-        self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(args.biased_var), '32_0.001_best.pth'))
-        self.P.eval()
+        self.P.train()
         if self.gpu: self.P.cuda()
         summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
         if self.multi_gpu:
             self.G = nn.DataParallel(self.G)
             self.D = nn.DataParallel(self.D)
+            self.P = nn.DataParallel(self.P)
         
         self.optim_G = optim.Adam(self.G.parameters(), lr=args.lr, betas=args.betas)
         self.optim_D = optim.Adam(self.D.parameters(), lr=args.lr, betas=args.betas)
+        self.optim_P = optim.Adam(self.P.parameters(), lr=args.lr, betas=args.betas)
     
     def set_lr(self, lr):
         for g in self.optim_G.param_groups:
             g['lr'] = lr
         for g in self.optim_D.param_groups:
             g['lr'] = lr
+        for g in self.optim_P.param_groups:
+            g['lr'] = lr
+    
+    def _criterion_regr(self, output, target):
+        # return F.l1_loss(output, target)
+        return F.mse_loss(output, target)
     
     def trainG(self, img_a, att_a, att_b):
         for p in self.D.parameters():
@@ -236,13 +239,15 @@ class AttGAN():
             gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = self.P._criterion_regr(dc_fake, att_b)
+        gc_loss = self._criterion_regr(dc_fake, att_b)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.gc * gc_loss + self.gr * gr_loss
         
         self.optim_G.zero_grad()
+        self.optim_P.zero_grad()
         g_loss.backward()
         self.optim_G.step()
+        self.optim_P.step()
         
         errG = {
             'g_loss': g_loss.item(), 'gf_loss': gf_loss.item(),
@@ -301,12 +306,14 @@ class AttGAN():
             df_gp = gradient_penalty(self.D, img_a)
         # print(dc_real.size())
         # print(att_a.size())
-        dc_loss = self.P._criterion_regr(dc_real, att_b)
+        dc_loss = self._criterion_regr(dc_real, att_b)
         d_loss = df_loss + self.lambda_gp * df_gp + self.dc * dc_loss
         
         self.optim_D.zero_grad()
+        self.optim_P.zero_grad()
         d_loss.backward()
         self.optim_D.step()
+        self.optim_P.step()
         
         errD = {
             'd_loss': d_loss.item(), 'df_loss': df_loss.item(), 
@@ -333,7 +340,8 @@ class AttGAN():
             'G': self.G.state_dict(),
             'D': self.D.state_dict(),
             'optim_G': self.optim_G.state_dict(),
-            'optim_D': self.optim_D.state_dict()
+            'optim_D': self.optim_D.state_dict(),
+            'optim_P': self.optim_P.state_dict()
         }
         torch.save(states, path)
     
@@ -343,10 +351,14 @@ class AttGAN():
             self.G.load_state_dict(states['G'])
         if 'D' in states:
             self.D.load_state_dict(states['D'])
+        if 'P' in states:
+            self.P.load_state_dict(states['P'])
         if 'optim_G' in states:
             self.optim_G.load_state_dict(states['optim_G'])
         if 'optim_D' in states:
             self.optim_D.load_state_dict(states['optim_D'])
+        if 'optim_P' in states:
+            self.optim_P.load_state_dict(states['optim_P'])
     
     def saveG(self, path):
         states = {

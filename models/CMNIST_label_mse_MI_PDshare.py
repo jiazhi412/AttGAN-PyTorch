@@ -46,7 +46,7 @@ class Model(C):
         self.it = 0
 
         # Generator
-        self.G = Generator_no_inject(
+        self.G = Generator_no_inject_sigmoid(
             args.enc_dim, args.enc_layers, args.enc_norm, args.enc_acti,
             args.dec_dim, args.dec_layers, args.dec_norm, args.dec_acti,
             args.n_attrs, args.shortcut_layers, args.inject_layers, args.img_size,
@@ -66,7 +66,7 @@ class Model(C):
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
 
         # MI
-        self.mine = M(input_dim=args.enc_dim * 2 ** (args.enc_layers-1) * 7 * 7) # 64 * (2**(5-1)) * 7 * 7 = 50176
+        self.mine = M(input_dim=args.enc_dim * 2 ** (args.enc_layers-1) * 4 * 4) # 64 * (2**(3-1)) * 3 * 3 = 4096
         self.mine.train()
         if self.gpu: self.mine.cuda()
 
@@ -105,7 +105,7 @@ class Model(C):
             g['lr'] = lr
         for g in self.optim_mine.param_groups:
             g['lr'] = lr
-    
+
     def _attr_criterion(self, zs, a, which_loss='l1'):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
         if which_loss == 'mse':
@@ -113,6 +113,16 @@ class Model(C):
         elif which_loss == 'l1':
             loss = F.l1_loss(zs[:,:self.dim_attrs,:,:], a_tile)
         return loss
+    
+    def prepare_data(self, img_a, att_a, args):
+        img_a = img_a.cuda() if args.gpu else img_a
+        att_a = att_a.cuda() if args.gpu else att_a
+
+        att_b = torch.ones_like(att_a)
+        
+        att_a = att_a.type(torch.float)
+        att_b = att_b.type(torch.float)
+        return img_a, att_a, att_a, att_b, att_b
     
     def train_epoch(self, train_dataloader, valid_dataloader, it_per_epoch, args):
         progressbar = Progressbar()
@@ -142,7 +152,7 @@ class Model(C):
                 batch_iter = self.trainMI(batch_iter, mine_loader, args)
             elif phase == 1:
                 # train decoder to express the wanted sex attribute from specific dimension
-                errG2 = self.trainG_P2(img_a, att_a, att_a_,  att_b, att_b_)
+                errG2 = self.trainG_P2(img_a, att_a, att_a_, att_b, att_b_)
             elif phase == 2:
                 # 1. train classifier to well predict sex; 2. train discriminator to well classify real and fake image
                 errD = self.trainD(img_a, att_a, att_a_, att_b, att_b_)
@@ -181,6 +191,8 @@ class Model(C):
             z = self.G(img_a, mode='enc').detach()
             z_a = z[:,:self.dim_attrs].view(z.size(0), -1)
             z_s = z[:,self.dim_attrs:].view(z.size(0), -1)
+            # print(z_a.size())
+            # print(z_s.size())
             mine_loss = mi_criterion(z_a, z_s, self.mine)
             mine_loss.backward()
             self.optim_mine.step()
@@ -225,7 +237,8 @@ class Model(C):
         # gr_loss = F.mse_loss(img_recon, img_a)
 
         # 2. classify the sex out from reconstruct image, let recon image yield such sex
-        gc_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        # gc_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        gc_loss = F.mse_loss(dc_recon, att_a)
 
         # 3. let specific dimension to be sex itself
         ga_loss = self._attr_criterion(z, att_a_)
@@ -273,14 +286,16 @@ class Model(C):
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
         
         # 2. classify the sex out from reconstruct image, let fake image yield such sex
-        gc_fake_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b) 
+        # gc_fake_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b) 
+        gc_fake_loss = F.mse_loss(dc_fake, att_b) 
 
         # 3. maintain the reconstruct quality of decoder output with perturb dimension
         gr_loss = F.l1_loss(img_recon, img_a)
         # gr_loss = F.mse_loss(img_recon, img_a)
 
         # 4. classify the sex out from reconstruct image, let recon image yield such sex
-        gc_recon_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        # gc_recon_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        gc_recon_loss = F.mse_loss(dc_recon, att_a)
 
         g_loss = gf_loss + self.gc * gc_fake_loss + self.gc * gc_recon_loss + self.gr * gr_loss
         
@@ -353,13 +368,16 @@ class Model(C):
             df_gp = gradient_penalty(self.D, img_a)
 
         # 2. classify the sex out from fake image, let fake image yield such sex
-        dc_fake_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b) 
+        # dc_fake_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b) 
+        dc_fake_loss = F.mse_loss(dc_fake, att_b) 
 
         # 3. classify the sex out from reconstruct image, let recon image yield such sex
-        dc_recon_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        # dc_recon_loss = F.binary_cross_entropy_with_logits(dc_recon, att_a)
+        dc_recon_loss = F.mse_loss(dc_recon, att_a)
 
         # 3. classify the sex out from real image, train classifier
-        dc_real_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
+        # dc_real_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
+        dc_real_loss = F.mse_loss(dc_real, att_a)
 
         d_loss = df_loss + self.gp * df_gp + self.dc * dc_fake_loss + self.dc * dc_recon_loss + self.dc * dc_real_loss
         # d_loss = df_loss + df_loss_recon + self.gp * (df_gp + df_gp_recon) + self.dc * dc_fake_loss + self.dc * dc_recon_loss
@@ -393,7 +411,7 @@ class Model(C):
         # If you'd like to keep weights of G, D, optim_G, optim_D,
         # please use save() instead of saveG().
         self.saveG(os.path.join(
-            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
+            '/nas/vista-ssd01/users/jiazli/attGAN', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(self.epoch)
         ))
         # self.save(os.path.join(
         #     'result', args.experiment, args.name, hyperparameter, 'checkpoint', 'weights.{:d}.pth'.format(epoch)
@@ -401,31 +419,19 @@ class Model(C):
     
     def eval_model(self, valid_dataloader, it_per_epoch, args):
         fixed_img_a, fixed_att_a = next(iter(valid_dataloader))
-        fixed_att_a = torch.unsqueeze(fixed_att_a,1) if len(list(fixed_att_a.size())) == 1 else fixed_att_a
         fixed_img_a = fixed_img_a.cuda() if args.gpu else fixed_img_a
         fixed_att_a = fixed_att_a.cuda() if args.gpu else fixed_att_a
-        fixed_att_a = fixed_att_a.type(torch.float)
-        sample_att_b_list = [fixed_att_a]
-        for i in range(args.n_attrs):
-            tmp = fixed_att_a.clone()
-            tmp[:, i] = 1 - tmp[:, i]
-            tmp = check_attribute_conflict(tmp, args.attrs[i], args.attrs)
-            sample_att_b_list.append(tmp)
+        sample_att_b_list = [fixed_att_a, torch.ones_like(fixed_att_a), torch.zeros_like(fixed_att_a)]
 
         # eval model
         self.eval()
         with torch.no_grad():
             samples = [fixed_img_a]
             for i, att_b in enumerate(sample_att_b_list):
-                att_b_ = (att_b * 2 - 1) * args.thres_int # -1/2, 1/2 for all
-                if i > 0: # i == 0 is for reconstruction
-                    att_b_[..., i - 1] = att_b_[..., i - 1] * args.test_int / args.thres_int # -1, 1 for interested att; -1/2, 1/2 for others
-                samples.append(self.G(fixed_img_a, att_b_))
-            samples.append((samples[-1] + samples[-2])/2)
-            samples.append(self.G(fixed_img_a, torch.zeros_like(att_b_)))
+                samples.append(self.G(fixed_img_a, att_b))
             samples = torch.cat(samples, dim=3)
             vutils.save_image(samples, os.path.join(
-                    'result', args.experiment, args.name, self.hyperparameter, 'sample_training',
+                    'result', args.experiment, args.name, str(args.biased_var), self.hyperparameter, 'sample_training',
                     'Epoch_({:d})_({:d}of{:d}).jpg'.format(self.epoch, self.it%it_per_epoch+1, it_per_epoch)
                 ), nrow=1, normalize=False, range=(0., 1.))
             # wandb.log({'test/filtered images': wandb.Image(vutils.make_grid(samples, nrow=1, padding=0, normalize=False))})

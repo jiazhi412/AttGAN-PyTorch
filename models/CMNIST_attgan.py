@@ -5,11 +5,15 @@
 
 """AttGAN, generator, and discriminator."""
 
+from asyncore import file_dispatcher
 import torch
 import torch.nn as nn
 from nn import LinearBlock, Conv2dBlock, ConvTranspose2dBlock
+from models.module.Encoder import *
+from models.module.Regressor import *
 from torchsummary import summary
 import wandb
+import os
 
 
 # This architecture is for images of 128x128
@@ -17,14 +21,15 @@ import wandb
 MAX_DIM = 64 * 16  # 1024
 
 class Generator(nn.Module):
-    def __init__(self, enc_dim=64, enc_layers=5, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
-                 dec_dim=64, dec_layers=5, dec_norm_fn='batchnorm', dec_acti_fn='relu',
-                 n_attrs=13, shortcut_layers=1, inject_layers=0, img_size=128, dim_per_attr=1):
+    def __init__(self, enc_dim=64, enc_layers=3, enc_norm_fn='batchnorm', enc_acti_fn='lrelu',
+                 dec_dim=64, dec_layers=3, dec_norm_fn='batchnorm', dec_acti_fn='relu',
+                 n_attrs=3, shortcut_layers=1, inject_layers=1, img_size=32, dim_per_attr=5):
         super(Generator, self).__init__()
         self.shortcut_layers = min(shortcut_layers, dec_layers - 1)
         self.inject_layers = min(inject_layers, dec_layers - 1)
         self.f_size = img_size // 2**enc_layers  # f_size = 4 for 128x128
         self.dim_per_attr = dim_per_attr
+        self.dim_for_attrs = dim_per_attr * n_attrs
         
         layers = []
         n_in = 3
@@ -37,7 +42,7 @@ class Generator(nn.Module):
         self.enc_layers = nn.ModuleList(layers)
         
         layers = []
-        n_in = n_in + n_attrs  # 1024 + 13
+        n_in = n_in + self.dim_for_attrs
         for i in range(dec_layers):
             if i < dec_layers - 1:
                 n_out = min(dec_dim * 2**(dec_layers-i-1), MAX_DIM)
@@ -46,10 +51,10 @@ class Generator(nn.Module):
                 )]
                 n_in = n_out
                 n_in = n_in + n_in//2 if self.shortcut_layers > i else n_in
-                n_in = n_in + n_attrs if self.inject_layers > i else n_in
-            else:
+                n_in = n_in + self.dim_for_attrs if self.inject_layers > i else n_in
+            else: # last layer
                 layers += [ConvTranspose2dBlock(
-                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='tanh'
+                    n_in, 3, (4, 4), stride=2, padding=1, norm_fn='none', acti_fn='sigmoid'
                 )]
         self.dec_layers = nn.ModuleList(layers)
     
@@ -64,6 +69,10 @@ class Generator(nn.Module):
     def decode(self, zs, a):
         a_tile = a.view(a.size(0), -1, 1, 1).repeat(1, self.dim_per_attr, self.f_size, self.f_size)
         z = torch.cat([zs[-1], a_tile], dim=1)
+        # print(a.size())
+        # print(a_tile.size())
+        # print(zs[-1].size())
+        # print(z.size())
         for i, layer in enumerate(self.dec_layers):
             z = layer(z)
             if self.shortcut_layers > i:  # Concat 1024 with 512
@@ -88,7 +97,7 @@ class Generator(nn.Module):
 class Discriminators(nn.Module):
     # No instancenorm in fcs in source code, which is different from paper.
     def __init__(self, dim=64, norm_fn='instancenorm', acti_fn='lrelu',
-                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=5, img_size=128, n_attrs=13):
+                 fc_dim=1024, fc_norm_fn='none', fc_acti_fn='lrelu', n_layers=3, img_size=128, n_attrs=3):
         super(Discriminators, self).__init__()
         self.f_size = img_size // 2**n_layers
         
@@ -101,14 +110,13 @@ class Discriminators(nn.Module):
             )]
             n_in = n_out
         self.conv = nn.Sequential(*layers)
-        fc_in_dim = min(dim * 2**(n_layers-1), MAX_DIM)
-        # print(fc_in_dim)
         self.fc_adv = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+            LinearBlock(256 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
             LinearBlock(fc_dim, 1, 'none', 'none')
         )
+
         self.fc_cls = nn.Sequential(
-            LinearBlock(fc_in_dim * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
+            LinearBlock(256 * self.f_size * self.f_size, fc_dim, fc_norm_fn, fc_acti_fn),
             LinearBlock(fc_dim, n_attrs, 'none', 'none')
         )
     
@@ -118,6 +126,37 @@ class Discriminators(nn.Module):
         return self.fc_adv(h), self.fc_cls(h)
 
 
+# class Adv(nn.Module):
+    
+#     def __init__(self):
+#         super().__init__()
+#         self.hidden_size = 128
+#         # ========= create models ===========
+#         self.encoder = Encoder(e_dim=self.hidden_size)
+#         self.regressor = Regressor(e_dim=self.hidden_size)
+#         self.sig = nn.Sigmoid()
+    
+#     def load_weights(self, file_path, optim_pred=None):
+#         ckpt = torch.load(file_path)
+#         self.epoch = ckpt['pretrain_epoch']
+#         self.encoder.load_state_dict(ckpt["encoder"])
+#         self.regressor.load_state_dict(ckpt["regressor"])
+#         if optim_pred is not None:
+#             optim_pred_state_dict = ckpt["optim_pred"]
+#             if optim_pred_state_dict is None:
+#                 print("WARNING: No optim_pred state dict found")
+#             else:
+#                 optim_pred.load_state_dict(optim_pred_state_dict)
+    
+#     def _criterion_regr(self, output, target):
+#         # return F.l1_loss(output, target)
+#         return F.mse_loss(output, target)
+    
+#     def forward(self, x):
+#         z = self.encoder(x)
+#         a_pred = self.regressor(z)
+#         return self.sig(a_pred)
+        
 
 import torch.autograd as autograd
 import torch.nn.functional as F
@@ -146,7 +185,7 @@ class AttGAN():
         )
         self.G.train()
         if self.gpu: self.G.cuda()
-        # summary(self.G, [(3, args.img_size, args.img_size), (args.n_attrs, 1, 1)], batch_size=4, device='cuda' if args.gpu else 'cpu')
+        summary(self.G, [(3, args.img_size, args.img_size), (args.n_attrs, 1, 1)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
         self.D = Discriminators(
             args.dis_dim, args.dis_norm, args.dis_acti,
@@ -156,6 +195,16 @@ class AttGAN():
         self.D.train()
         if self.gpu: self.D.cuda()
         summary(self.D, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
+
+        # self.P = Adv()
+        # # unbiased
+        # # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_sig.pth')
+        # # biased var=0
+        # # self.P.load_weights(file_path='/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/label_0.pth')
+        # self.P.load_weights(file_path=os.path.join('/nas/home/jiazli/code/Adversarial-Filter-Debiasing/pretrain/predictor/CMNIST/921', str(args.biased_var), '32_0.001_best.pth'))
+        # self.P.eval()
+        # if self.gpu: self.P.cuda()
+        # summary(self.P, [(3, args.img_size, args.img_size)], batch_size=4, device='cuda' if args.gpu else 'cpu')
         
         if self.multi_gpu:
             self.G = nn.DataParallel(self.G)
@@ -170,46 +219,51 @@ class AttGAN():
         for g in self.optim_D.param_groups:
             g['lr'] = lr
     
-    def trainG(self, img_a, att_a, att_a_, att_b, att_b_):
+    def _criterion_regr(self, output, target):
+        # return F.l1_loss(output, target)
+        return F.mse_loss(output, target)
+    
+    def trainG(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = False
-        
+
         zs_a = self.G(img_a, mode='enc')
-        img_fake = self.G(zs_a, att_b_, mode='dec')
-        img_recon = self.G(zs_a, att_a_, mode='dec')
+        
+        img_fake = self.G(zs_a, att_b, mode='dec')
+        img_recon = self.G(zs_a, att_a, mode='dec')
         d_fake, dc_fake = self.D(img_fake)
         
-        if self.mode == 'wgan':    
+        if self.mode == 'wgan':
             gf_loss = -d_fake.mean()
         if self.mode == 'lsgan':  # mean_squared_error
-            gf_loss = F.mse_loss(d_fake, torch.ones_like(d_fake))
+            gf_loss = F.mse_loss(F.sigmoid(d_fake), torch.ones_like(d_fake))
         if self.mode == 'dcgan':  # sigmoid_cross_entropy
             gf_loss = F.binary_cross_entropy_with_logits(d_fake, torch.ones_like(d_fake))
-        gc_loss = F.binary_cross_entropy_with_logits(dc_fake, att_b)
+        gc_loss = self._criterion_regr(dc_fake, att_b)
         gr_loss = F.l1_loss(img_recon, img_a)
         g_loss = gf_loss + self.gc * gc_loss + self.gr * gr_loss
         
         self.optim_G.zero_grad()
         g_loss.backward()
         self.optim_G.step()
-
+        
+        errG = {
+            'g_loss': g_loss.item(), 'gf_loss': gf_loss.item(),
+            'gc_loss': gc_loss.item(), 'gr_loss': gr_loss.item()
+        }
         wandb.log({
             'g/total_loss': g_loss.item(),
             'g/fake_loss': gf_loss.item(),
             'g/classifier_loss': gc_loss.item(),
             'g/reconstuct_loss': gr_loss.item(),
-            })
-        errG = {
-            'g_loss': g_loss.item(), 'gf_loss': gf_loss.item(),
-            'gc_loss': gc_loss.item(), 'gr_loss': gr_loss.item()
-        }
+        })
         return errG
     
-    def trainD(self, img_a, att_a, att_a_, att_b, att_b_):
+    def trainD(self, img_a, att_a, att_b):
         for p in self.D.parameters():
             p.requires_grad = True
         
-        img_fake = self.G(img_a, att_b_).detach()
+        img_fake = self.G(img_a, att_b).detach()
         d_real, dc_real = self.D(img_a)
         d_fake, dc_fake = self.D(img_fake)
         
@@ -236,7 +290,7 @@ class AttGAN():
             gp = ((norm - 1.0) ** 2).mean()
             return gp
         
-        if self.mode == 'wgan': # discriminator becomes critic
+        if self.mode == 'wgan':
             wd = d_real.mean() - d_fake.mean()
             df_loss = -wd
             df_gp = gradient_penalty(self.D, img_a, img_fake)
@@ -244,13 +298,13 @@ class AttGAN():
             df_loss = F.mse_loss(d_real, torch.ones_like(d_fake)) + \
                       F.mse_loss(d_fake, torch.zeros_like(d_fake))
             df_gp = gradient_penalty(self.D, img_a)
-        if self.mode == 'dcgan': # Deep Convolutional gan  # sigmoid_cross_entropy 
+        if self.mode == 'dcgan':  # sigmoid_cross_entropy
             df_loss = F.binary_cross_entropy_with_logits(d_real, torch.ones_like(d_real)) + \
                       F.binary_cross_entropy_with_logits(d_fake, torch.zeros_like(d_fake))
             df_gp = gradient_penalty(self.D, img_a)
         # print(dc_real.size())
         # print(att_a.size())
-        dc_loss = F.binary_cross_entropy_with_logits(dc_real, att_a)
+        dc_loss = self._criterion_regr(dc_real, att_b)
         d_loss = df_loss + self.lambda_gp * df_gp + self.dc * dc_loss
         
         self.optim_D.zero_grad()

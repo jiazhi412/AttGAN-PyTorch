@@ -49,7 +49,8 @@ class ColoredDataset_generated(Dataset):
         zeros_map = torch.zeros((3,32,32))
         # color_img = torch.where(img_dup > 0, color_map, img_dup)
         color_img = torch.where(img_dup < 0.3, zeros_map, color_map)
-        return color_img, label, color.squeeze()
+        # return color_img, label, color.squeeze()
+        return color_img, color.squeeze()
 
         
 class ColoredDataset_given(Dataset):

@@ -152,8 +152,15 @@ class Model(B):
             img_a, att_a, att_a_, att_b, att_b_ = self.prepare_data(img_a, att_a, args)
             self.optim_mine.zero_grad()
             zs_a = self.G(img_a, mode='enc')
-            z = zs_a[-1]
+
             mine_loss = mi_criterion(zs_a[-1][:,:self.dim_per_attr].detach().view(zs_a[-1].size(0), -1), zs_a[-1][:,self.dim_per_attr:].detach().view(zs_a[-1].size(0), -1), self.mine)
+            z_a = zs_a[-1][:,:self.dim_per_attr].detach().view(zs_a[-1].size(0), -1)
+            z_s = zs_a[-1][:,self.dim_per_attr:].detach().view(zs_a[-1].size(0), -1)
+            print(z_a)
+            print(z_s)
+            print(z_a.size())
+            print(z_s.size())
+            mine_loss = mi_criterion(z_a, z_s, self.mine)
             mine_loss.backward()
             self.optim_mine.step()
             loss_mine += mine_loss.item()

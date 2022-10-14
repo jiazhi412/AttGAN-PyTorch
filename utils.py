@@ -8,6 +8,7 @@
 import os
 from glob import glob
 import pickle
+import torch
 
 
 def find_model(path, epoch='latest'):
@@ -32,3 +33,18 @@ def nextbatch(it, loader):
         it = iter(loader)
         x, target = next(it)
     return x, target, it
+
+def one_hot_embedding(labels, num_classes):
+    """Embedding labels to one-hot form.
+
+    Args:
+    labels: (LongTensor) class labels, sized [N,].
+    num_classes: (int) number of classes.
+
+    Returns:
+    (tensor) encoded labels, sized [N, #classes].
+    """
+    labels = labels.type(torch.LongTensor)
+    y = torch.eye(num_classes) 
+    res = y[labels].squeeze_()
+    return res

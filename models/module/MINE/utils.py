@@ -17,7 +17,8 @@ def mi_criterion(a, z, mine_net):
 
     t = mine_net(joint)
     et = torch.exp(mine_net(marginal))
-    mi_loss = -(torch.mean(t) - torch.log(torch.mean(et)))
+    mi = torch.mean(t) - torch.log(torch.mean(et))
+    mi_loss = -mi
     return mi_loss
 
 def mutual_information(joint, marginal, mine_net):
